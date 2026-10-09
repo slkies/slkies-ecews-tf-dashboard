@@ -379,14 +379,17 @@ class Vault:
         # out of the key later.
         pep_of = dict(zip(k[missing],
                           pep.astype("string").str.strip()[missing]))
-        for key in k[missing].dropna().unique():
+        fresh = k[missing].dropna().unique()
+        for key in fresh:
             sn = new_sn()
             self.lookup[key] = sn
             self.added.append({VAULT_NEW: key, VAULT_OLD: rev.get(key),
                                VAULT_PEP: pep_of.get(key), KEY: sn})
-        if len(self.added):
+        if len(fresh):
             out = k.map(self.lookup)
-            log.info("vault: %s new client(s) assigned a key", f"{len(self.added):,}")
+            # This call's count, not the running total: the EAC lists call this
+            # too, and repeating the treatment list's figure read as new clients.
+            log.info("vault: %s new client(s) assigned a key", f"{len(fresh):,}")
         return out
 
     def links(self) -> dict[str, str]:
@@ -816,6 +819,64 @@ def apply_links(links: dict[str, str], treat: pd.DataFrame, register: pd.DataFra
     return treat[~gone]
 
 
+def _loose(k: str) -> str:
+    """A key with punctuation dropped and leading zeros taken off each number:
+    'ABC-0042' and 'ABC42' come out the same. Used only to ask whether a "new"
+    key is really an existing one written differently - never to assign one."""
+    s = re.sub(r"[^A-Z0-9]", "", str(k).upper())
+    return re.sub(r"(?<![0-9])0+(?=[0-9])", "", s)
+
+
+def explain_new_clients(treat: pd.DataFrame, new_keys: set[str], known: set[str]) -> None:
+    """Say what kind of rows were just issued a key. COUNTS AND SHAPES ONLY.
+
+    A normal week issues about a hundred, nearly all recent enrolments. A large
+    batch is either a genuine change in what the export covers, or existing
+    clients whose PEPID or facility code is now written differently - which
+    would give them a second S/N and cut them off from their history. The two
+    leave different traces, and this prints the traces.
+    """
+    if not new_keys or not {"pepId", "datimCode"} <= set(treat.columns):
+        return
+    k = norm_key(build_key(treat["datimCode"], treat["pepId"]))
+    new = treat[k.isin(new_keys)]
+    old = treat[k.notna() & ~k.isin(new_keys)]
+    log.info("new clients: %s row(s) under %s new key(s)", f"{len(new):,}", f"{len(new_keys):,}")
+
+    # 1. Would a looser reading of the key have found them in the vault?
+    loose_known = {_loose(x) for x in known}
+    near = sum(1 for x in new_keys if _loose(x) in loose_known)
+    log.info("  %s of the new keys match an existing client once punctuation and "
+             "leading zeros are ignored%s", f"{near:,}",
+             " - THESE ARE EXISTING CLIENTS WRITTEN DIFFERENTLY; do not run -Go"
+             if near else " (none: not a formatting change)")
+
+    # 2. Do they look like the rest of the export?
+    shp = lambda s: s.dropna().astype(str).map(code_shape).value_counts(normalize=True).head(2)
+    fmt_sh = lambda v: ", ".join(f"{a} {b:.0%}" for a, b in v.items()) or "none"
+    log.info("  PEPID shape - new: %s | existing: %s", fmt_sh(shp(new["pepId"])), fmt_sh(shp(old["pepId"])))
+
+    # 3. When did they start ART? New enrolments started recently.
+    by = {norm_col(c): c for c in treat.columns}
+    if by.get("artstartdate"):
+        y = pd.to_datetime(new[by["artstartdate"]], errors="coerce").dt.year
+        bands = {"2026": (y == 2026).sum(), "2025": (y == 2025).sum(),
+                 "2020-2024": y.between(2020, 2024).sum(), "before 2020": (y < 2020).sum(),
+                 "no date": y.isna().sum()}
+        log.info("  ART start year: %s", ", ".join(f"{a} {int(b):,}" for a, b in bands.items()))
+    if by.get("currentartstatus"):
+        st = new[by["currentartstatus"]].astype("string").str.strip().fillna("(blank)").value_counts().head(5)
+        log.info("  ART status: %s", ", ".join(f"{a} {b:,}" for a, b in st.items()))
+
+    # 4. Spread across facilities. A batch concentrated in a few facilities
+    # points at those facilities' records, not at enrolment.
+    per = new["datimCode"].value_counts()
+    if len(per):
+        log.info("  spread: %s facility code(s); the largest holds %.0f%% of the new rows, "
+                 "the top 3 hold %.0f%%", f"{len(per):,}", per.iloc[0] / len(new) * 100,
+                 per.head(3).sum() / len(new) * 100)
+
+
 def code_shape(v: object) -> str:
     """A value reduced to its character classes, e.g. 'AAA999_A999A_'.
 
@@ -1196,7 +1257,9 @@ def main() -> int:
             log.warning("%s row(s) where the export's %s differs from "
                         "datimCode+pepId - using the value we built",
                         f"{mismatch:,}", VAULT_NEW)
+    known_before, added_before = set(vault.lookup), len(vault.added)
     treat[KEY] = vault.resolve(treat["datimCode"], treat["pepId"])
+    explain_new_clients(treat, {r[VAULT_NEW] for r in vault.added[added_before:]}, known_before)
     vault.fill_pepid_from_export(treat["datimCode"], treat["pepId"],
                                  write_report=not a.dry_run)
 
