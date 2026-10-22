@@ -1029,7 +1029,11 @@ def _dist(s, order=None, top=None, na="Not recorded") -> list[dict]:
     """Distribution of a series as [{level, n, pct}], honouring a fixed order."""
     if s is None:
         return []
-    s = pd.Series(s).fillna(na).astype(str).replace({"nan": na, "None": na, "<NA>": na})
+    # Object first: a categorical (age_group is built with pd.cut) refuses a
+    # fill value that is not one of its categories under pandas 2.x, so any
+    # episode with no recorded age made the whole Deep dive request fail.
+    s = pd.Series(s).astype(object)
+    s = s.where(s.notna(), na).astype(str).replace({"nan": na, "None": na, "<NA>": na})
     vc = s.value_counts()
     n = int(vc.sum())
     if order:
