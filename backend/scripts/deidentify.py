@@ -827,7 +827,9 @@ def _loose(k: str) -> str:
     return re.sub(r"(?<![0-9])0+(?=[0-9])", "", s)
 
 
-def explain_new_clients(treat: pd.DataFrame, new_keys: set[str], known: set[str]) -> None:
+def explain_new_clients(treat: pd.DataFrame, new_keys: set[str], known: set[str],
+                        lookup: dict[str, str] | None = None,
+                        report: Path | None = None) -> None:
     """Say what kind of rows were just issued a key. COUNTS AND SHAPES ONLY.
 
     A normal week issues about a hundred, nearly all recent enrolments. A large
@@ -844,12 +846,31 @@ def explain_new_clients(treat: pd.DataFrame, new_keys: set[str], known: set[str]
     log.info("new clients: %s row(s) under %s new key(s)", f"{len(new):,}", f"{len(new_keys):,}")
 
     # 1. Would a looser reading of the key have found them in the vault?
-    loose_known = {_loose(x) for x in known}
-    near = sum(1 for x in new_keys if _loose(x) in loose_known)
-    log.info("  %s of the new keys match an existing client once punctuation and "
-             "leading zeros are ignored%s", f"{near:,}",
-             " - THESE ARE EXISTING CLIENTS WRITTEN DIFFERENTLY; do not run -Go"
-             if near else " (none: not a formatting change)")
+    loose_known: dict[str, str] = {}
+    for x in known:
+        loose_known.setdefault(_loose(x), x)
+    pairs = [(x, loose_known[_loose(x)]) for x in sorted(new_keys) if _loose(x) in loose_known]
+    near = len(pairs)
+    # A handful is a few records typed differently; a share of the batch is a
+    # change in how the export writes keys. Only the second stops a run.
+    wholesale = near > max(10, len(new_keys) * 0.05)
+    if not near:
+        log.info("  0 of the new keys match an existing client once punctuation and "
+                 "leading zeros are ignored (none: not a formatting change)")
+    elif wholesale:
+        log.warning("  %s of %s new keys match an existing client once punctuation and "
+                    "leading zeros are ignored - the export has changed how it writes "
+                    "keys; do NOT run -Go", f"{near:,}", f"{len(new_keys):,}")
+    else:
+        log.warning("  %s new key(s) match an existing client once punctuation and "
+                    "leading zeros are ignored - a few records typed differently, not a "
+                    "format change; safe to run. %s", f"{near:,}",
+                    f"Listed in {report.name} to check by hand." if report
+                    else "They are listed beside the vault on a real run.")
+        if report is not None:
+            pd.DataFrame([{"new key": a, "existing key": b,
+                           "existing S/N": (lookup or {}).get(b)} for a, b in pairs]) \
+                .to_csv(report, index=False)
 
     # 2. Do they look like the rest of the export?
     shp = lambda s: s.dropna().astype(str).map(code_shape).value_counts(normalize=True).head(2)
@@ -1259,7 +1280,11 @@ def main() -> int:
                         f"{mismatch:,}", VAULT_NEW)
     known_before, added_before = set(vault.lookup), len(vault.added)
     treat[KEY] = vault.resolve(treat["datimCode"], treat["pepId"])
-    explain_new_clients(treat, {r[VAULT_NEW] for r in vault.added[added_before:]}, known_before)
+    explain_new_clients(
+        treat, {r[VAULT_NEW] for r in vault.added[added_before:]}, known_before,
+        lookup=vault.lookup,
+        report=None if a.dry_run else
+        Path(P["vault"]).parent / f"{Path(P['vault']).stem}-NEAR-MATCH.csv")
     vault.fill_pepid_from_export(treat["datimCode"], treat["pepId"],
                                  write_report=not a.dry_run)
 
