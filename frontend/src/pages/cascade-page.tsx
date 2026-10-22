@@ -34,6 +34,7 @@ export interface CascadeStep {
  * cascade shows the gap; the worklist puts names to it.
  */
 export const STEP_WORKLIST: Record<number, { flag: string; action: string }> = {
+  11: { flag: 'exited_no_vl', action: 'Left care before a repeat VL' },
   2: { flag: 'no_eac', action: 'No EAC record' },
   6: { flag: 'eac_incomplete', action: 'EAC not completed' },
   61: { flag: 'awaiting_vl', action: 'No post-EAC VL sample' },
@@ -45,10 +46,18 @@ export const STEP_WORKLIST: Record<number, { flag: string; action: string }> = {
  * EAC (4+) is not a drop from session 3, and a follow-up sample is not a drop
  * from EAC, so neither carries one.
  */
-const LOSS_FROM: Record<number, number> = { 2: 1, 3: 2, 4: 3, 6: 4, 8: 7 }
+const LOSS_FROM: Record<number, number> = { 2: 12, 3: 2, 4: 3, 6: 4, 8: 7 }
+
+/**
+ * Clients who left care before a repeat VL (step 11) are placed, not lost:
+ * drawn grey, and taken out of the base (step 12, "#1b") every later step is
+ * measured on. Older uploads have neither step; the page falls back to step 1.
+ */
+const LEFT = 11
+const BASE = 12
 
 /** Tier labels match the "#n" the denominators refer to. */
-const TIER: Record<number, string> = { 61: '6a', 91: '', 92: '', 93: '9b' }
+const TIER: Record<number, string> = { 11: '', 12: '1b', 61: '6a', 91: '', 92: '', 93: '9b' }
 const SUB = new Set([91, 92])
 
 export default function CascadePage({ onOpenWorklist }: { onOpenWorklist?: (flag: string) => void }) {
@@ -180,7 +189,7 @@ function Steps({ steps, bySex, setBySex, onOpenWorklist }: {
                   <div className="flex items-baseline gap-3 tabular-nums">
                     {loss > 0 && (
                       <span className="text-xs text-muted-foreground">
-                        <span className="sr-only">lost since step {LOSS_FROM[s.step]}: </span>−{fmt(loss)}
+                        <span className="sr-only">lost since step {TIER[LOSS_FROM[s.step]!] ?? LOSS_FROM[s.step]}: </span>−{fmt(loss)}
                       </span>
                     )}
                     <span className="text-sm font-medium">{fmt(s.n)}</span>
@@ -207,6 +216,7 @@ function StepBar({ step, N, bySex }: { step: CascadeStep; N: number; bySex: bool
   const unknown = step.n - (step.n_female ?? 0) - (step.n_male ?? 0)
   // Status colour only where the step itself is a bad outcome, and its label says so.
   const tone = step.step === 93 ? 'var(--bad)'
+    : step.step === LEFT ? 'var(--muted-foreground)'
     : SUB.has(step.step) ? 'color-mix(in oklch, var(--primary) 55%, transparent)'
     : 'var(--primary)'
   const seg = (v: number, color: string, last: boolean): CSSProperties => ({
@@ -245,8 +255,11 @@ function WhereLost({ steps, onOpenWorklist }: {
   onOpenWorklist?: (flag: string) => void
 }) {
   const g = (k: number) => steps.find((s) => s.step === k)?.n ?? 0
+  const base = steps.some((s) => s.step === BASE) ? g(BASE) : g(1)
   const gaps: { label: string; n: number; flag?: string; pending?: boolean }[] = [
-    { label: 'Never commenced EAC', n: Math.max(0, g(1) - g(2)), flag: 'no_eac' },
+    ...(steps.some((s) => s.step === LEFT)
+      ? [{ label: 'Left care before a repeat VL', n: g(LEFT), flag: 'exited_no_vl', pending: true }] : []),
+    { label: 'Never commenced EAC', n: Math.max(0, base - g(2)), flag: 'no_eac' },
     { label: 'Started, stopped before session 3', n: Math.max(0, g(2) - g(4)), flag: 'eac_incomplete' },
     { label: 'At session 3, not yet 30 days on', n: Math.max(0, g(4) - g(6)), pending: true },
     { label: 'Completed EAC, no post-EAC VL sample', n: Math.max(0, g(6) - g(61)), flag: 'awaiting_vl' },
@@ -259,8 +272,8 @@ function WhereLost({ steps, onOpenWorklist }: {
       <CardHeader>
         <CardTitle>Where the cohort is lost</CardTitle>
         <CardDescription>
-          Episodes at each gap. The grey bar is not yet a loss: those clients are inside the
-          30-day wait after session 3.
+          Episodes at each gap. Grey bars are not losses a team can close: clients who left care
+          before a repeat VL, and clients still inside the 30-day wait after session 3.
         </CardDescription>
       </CardHeader>
       <CardContent>
@@ -295,11 +308,14 @@ function WhereLost({ steps, onOpenWorklist }: {
 function Outcome({ steps }: { steps: CascadeStep[] }) {
   const g = (k: number) => steps.find((s) => s.step === k)?.n ?? 0
   const N = g(1)
+  const hasLeft = steps.some((s) => s.step === LEFT)
+  const base = hasLeft ? g(BASE) : N
   const parts = [
     { label: 'Undetectable (<50)', n: g(91), color: 'var(--good)' },
     { label: 'Low-level viraemia (50-999)', n: g(92), color: 'color-mix(in oklch, var(--good) 50%, transparent)' },
     { label: 'Still unsuppressed (1,000 or more)', n: g(93), color: 'var(--bad)' },
-    { label: 'No follow-up VL result yet', n: Math.max(0, N - g(8)), color: 'var(--muted-foreground)', faint: true },
+    { label: 'No follow-up VL result yet, still in care', n: Math.max(0, base - g(8)), color: 'var(--muted-foreground)', faint: true },
+    ...(hasLeft ? [{ label: 'Left care before a repeat VL', n: g(LEFT), color: 'var(--muted-foreground)', faint: true }] : []),
   ]
   const share = (v: number) => (N ? v / N * 100 : 0)
 

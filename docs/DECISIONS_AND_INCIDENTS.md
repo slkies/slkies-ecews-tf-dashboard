@@ -374,3 +374,28 @@ because the dashboard reads the first. Nothing is deleted from the EAC lists.
 
 **Note.** Line list changes compares S/Ns between uploads, so the first upload
 after this shows the linked people's episodes moving to their kept S/N.
+
+## 20. Clients who left care before a repeat VL are not a gap
+**22 Oct 2026** — Facilities followed up cascade gaps ("never commenced EAC",
+"no post-EAC VL") and found the client had left care months before: LTFU, died,
+transferred out, discontinued. Counted as a gap, they sent teams after work no
+one could do, and made the real gaps harder to see.
+
+**Rule (agreed with Es).** An episode whose ART status is a negative outcome
+(LTFU, IIT, stopped, died, transferred out, discontinued care) and that has no
+follow-up VL result is *left care before a repeat VL*
+(`indicators.left_care_untested`). Everywhere a gap is measured, it is measured
+among the rest:
+
+- the cascade shows them as their own grey step under step 1, and every later
+  step uses the base still in care or retested (step 1b);
+- the Overview tiles, quarterly cascade, state and facility tables and monthly
+  EAC uptake, and `/api/summary`, take their rates over that base and publish it
+  as `in_care` beside `left_care_untested`;
+- the gap worklists (no EAC, EAC incomplete, no post-EAC VL, unsuppressed over
+  six months, DTC review) leave them out, so a list's count is the gap beside it;
+- Deep dive's EAC status names them instead of counting them as never commenced.
+
+They stay in the cohort count and in their own worklist, *Left care before a
+repeat VL*. A client who left care **after** a repeat VL stays in the cascade:
+their outcome is known.

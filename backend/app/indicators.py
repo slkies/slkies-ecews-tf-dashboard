@@ -82,7 +82,7 @@ _PREG = {
 _ART_STATUS = {
     "active": "Active",
     "ltfu": "LTFU", "lost to followup": "LTFU", "lost to follow-up": "LTFU",
-    "death": "Died", "dead": "Died", "deceased": "Died",
+    "death": "Died", "died": "Died", "dead": "Died", "deceased": "Died",
     "transferred out": "Transferred out", "transfer out": "Transferred out",
     "transferred-out": "Transferred out",
     "discontinued care": "Discontinued care",
@@ -872,9 +872,15 @@ def cascade(df: pd.DataFrame) -> list[dict]:
     n = len(df)
     sex = df["sex"]
     allm = pd.Series(True, index=df.index)
+    # Clients who left care before a repeat VL are shown as their own step and
+    # taken out of every step after it, so each gap below is one a team can act
+    # on. Step 1 stays the whole cohort; nothing is hidden, only placed.
+    left = left_care_untested(df)
+    base = ~left
+    nb = int(base.sum())
 
     def m(col):
-        return df[col].fillna(False).astype(bool)
+        return df[col].fillna(False).astype(bool) & base
 
     e1 = int(m("eac1").sum())
     resn = int(m("post_result").sum())
@@ -893,7 +899,13 @@ def cascade(df: pd.DataFrame) -> list[dict]:
 
     return [
         step(1, "Total unsuppressed", allm, n, "-"),
-        step(2, "EAC commenced", m("eac1"), n, "#1"),
+        step(11, "Left care before a repeat VL", left, n, "#1",
+             note="LTFU, IIT, stopped, died, transferred out or discontinued, with no "
+                  "follow-up VL. Not a gap a team can close; taken out of every step "
+                  "below. Their worklist is 'Left care before a repeat VL'."),
+        step(12, "Still in care, or retested", base, n, "#1",
+             note="The base for every step below."),
+        step(2, "EAC commenced", m("eac1"), nb, "#1b"),
         step(3, "EAC session 2", m("eac2"), e1, "#2"),
         step(4, "EAC session 3", m("eac3"), e1, "#2"),
         step(5, "Extended EAC (4+)", m("eac_extended"), e1, "#2"),
@@ -902,10 +914,10 @@ def cascade(df: pd.DataFrame) -> list[dict]:
              int((m("eac1") & m("eac2") & m("eac3")).sum()), "#4",
              note="Sessions 1-3 done AND a VL sample on/after session 3, "
                   "irrespective of the 30-day rule."),
-        step(7, "Follow-up VL sample", m("post_sample"), n, "#1"),
-        step(8, "Follow-up VL result", m("post_result"), n, "#1",
+        step(7, "Follow-up VL sample", m("post_sample"), nb, "#1b"),
+        step(8, "Follow-up VL result", m("post_result"), nb, "#1b",
              note="Any later VL from the clinical line lists, not a post-EAC "
-                  "result. Reported against the cohort, not EAC1."),
+                  "result. Reported against the cohort still in care, not EAC1."),
         step(9, "Re-suppressed (<1,000)", m("resuppressed"), resn, "#8"),
         step(91, "- Undetectable (<50)", m("undetectable"), resn, "#8"),
         step(92, "- LLV (50-999)", m("llv"), resn, "#8"),
@@ -1059,9 +1071,12 @@ def profile(df: pd.DataFrame) -> dict:
 
     yr_lab = ["<1 yr", "1-3 yr", "3-5 yr", "5-10 yr", "10+ yr"]
     mu_lab = ["<3 mo", "3-6 mo", "6-12 mo", "12+ mo"]
-    eac_status = np.where(df["eac_completed"].fillna(False).astype(bool), "Completed EAC",
+    # Left care before a repeat VL is its own level, not "Never commenced":
+    # counted there it read as an EAC gap that did not exist.
+    eac_status = np.where(left_care_untested(df), "Left care before a repeat VL",
+                 np.where(df["eac_completed"].fillna(False).astype(bool), "Completed EAC",
                  np.where(df["eac1"].fillna(False).astype(bool),
-                          "Commenced, not completed", "Never commenced"))
+                          "Commenced, not completed", "Never commenced")))
     qs = sorted(x for x in df["enrol_quarter"].dropna().unique())
 
     # monthly arrivals into the cohort, dated by result received at facility
@@ -1136,7 +1151,8 @@ def profile(df: pd.DataFrame) -> dict:
             "years_art": _dist(yrs.map(lambda v: _band(v, [1, 3, 5, 10], yr_lab)),
                                yr_lab + ["Not recorded"]),
             "eac_status": _dist(pd.Series(eac_status, index=df.index),
-                                ["Never commenced", "Commenced, not completed", "Completed EAC"]),
+                                ["Never commenced", "Commenced, not completed", "Completed EAC",
+                                 "Left care before a repeat VL"]),
             "who_stage": _dist(_col(df, "who_stage"),
                                ["Stage 1", "Stage 2", "Stage 3", "Stage 4", "Not recorded"]),
             "bmi": _dist(pd.to_numeric(_col(df, "bmi"), errors="coerce")
@@ -1292,6 +1308,24 @@ def care_status(df) -> pd.Series:
              .fillna("Not recorded"))
 
 
+def left_care_untested(df) -> pd.Series:
+    """Episodes whose client left care (LTFU, IIT, stopped, died, transferred out,
+    discontinued) and was never retested - no follow-up VL result.
+
+    They are not a gap a team can close. Counted as a gap, a facility saw a
+    client "never commenced EAC" or "no post-EAC VL", went looking, and found
+    the client had left care months before (Es, 22 Oct 2026). So every view
+    that measures a gap - the cascade, the Overview rates, the facility and
+    state tables, the gap worklists - measures it among the rest, and reports
+    these separately with their own worklist (exited_no_vl). A client who left
+    care AFTER being retested stays in: their outcome is known.
+    """
+    if df.empty:
+        return pd.Series(False, index=df.index)
+    return (care_status(df).isin(_NEG_OUTCOMES)
+            & ~df["post_result"].fillna(False).astype(bool))
+
+
 _EXIT_WHEN = ["Before the index VL", "Before EAC commencement",
               "During EAC, before the repeat VL", "After the repeat VL",
               "Exit date unknown"]
@@ -1383,8 +1417,13 @@ def breakdown(df: pd.DataFrame, by: str) -> list[dict]:
     if by not in df:
         return []
     rows = []
+    gone = left_care_untested(df)
     for k, g in df.groupby(by, dropna=False, observed=True):
-        e1, r = int(g["eac1"].sum()), int(g["post_result"].sum())
+        # EAC uptake is a gap measure, so it is taken over the episodes still in
+        # care or retested (left_care_untested). n stays the whole group.
+        stay = ~gone.loc[g.index]
+        e1, r = int(g.loc[stay, "eac1"].sum()), int(g["post_result"].sum())
+        nb = int(stay.sum())
         # A null group key rendered as the literal string "nan", which is not a
         # place, a sex, or anything else a reader can act on. For residence LGA
         # this bucket also holds free text that matched no boundary, so the
@@ -1392,7 +1431,8 @@ def breakdown(df: pd.DataFrame, by: str) -> list[dict]:
         blank = k is None or (isinstance(k, float) and pd.isna(k)) or str(k).lower() == "nan"
         rows.append({
             "group": "Not recorded / unmatched" if blank else str(k), "n": len(g),
-            "eac1": e1, "eac1_pct": round(e1 / len(g) * 100, 1) if len(g) else None,
+            "in_care": nb, "left_care": len(g) - nb,
+            "eac1": e1, "eac1_pct": round(e1 / nb * 100, 1) if nb else None,
             "post_result": r,
             "resuppressed": int(g["resuppressed"].sum()),
             "resupp_pct": round(int(g["resuppressed"].sum()) / r * 100, 1) if r else None,

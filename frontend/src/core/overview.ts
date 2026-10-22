@@ -3,6 +3,10 @@
 export interface ProgressRow {
   quarter: string
   n: number
+  /** Episodes still in care, or retested: the base every rate below is on. */
+  in_care?: number
+  /** Left care before a repeat VL - counted, but not a gap. */
+  left_care?: number
   eac1: number
   completed: number
   retested: number
@@ -64,6 +68,10 @@ export interface Overview {
 
   eac1: number; eac1_pct: number | null
   never_eac: number
+  /** The base every gap rate is measured on: episodes still in care, or retested. */
+  in_care?: number
+  /** Left care (LTFU, died, transferred out...) with no follow-up VL. Not a gap. */
+  left_care_untested?: number
   completed: number; completed_pct: number | null
   post_eac_vl: number
   retested: number; retest_pct: number | null

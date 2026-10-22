@@ -83,7 +83,7 @@ def test_eac_before_index_vl_is_a_prior_cycle_and_excluded():
     c = cohort([mk(Session_1_Date="2026-01-10")])   # before the 1 Mar index VL
     assert bool(c.df.loc[0, "eac1"]) is False
     assert bool(c.df.loc[0, "eac_prior_cycle"]) is True
-    assert cascade(c.df)[1]["n"] == 0               # step 2 = EAC commenced
+    assert next(s for s in cascade(c.df) if s["step"] == 2)["n"] == 0   # EAC commenced
 
 
 # ── §5: negative time-to-EAC is a data error, never a value ───────────
@@ -550,3 +550,31 @@ def test_audit_reports_an_underscored_rename_as_drift_not_missing():
     assert next(f for f in found if f[0] == "Expected column missing")[1] == 0
     drift = [f for f in found if f[0] == "Header casing drift (tolerated)"]
     assert drift and "Outcomes_Date should be outcomesDate" in drift[0][2]
+
+
+# ── clients who left care before a repeat VL are not a gap ─────────────
+def test_left_care_untested_is_a_negative_outcome_with_no_repeat_vl():
+    from app.indicators import left_care_untested
+    gone = cohort([mk()], status="LTFU")                                  # never retested
+    back = cohort([mk()], status="LTFU", fu_vl=400, fu_samp="2026-06-01")  # retested, then left
+    here = cohort([mk()], status="Active")                                # still in care
+    assert bool(left_care_untested(gone.df).iloc[0]) is True
+    assert bool(left_care_untested(back.df).iloc[0]) is False
+    assert bool(left_care_untested(here.df).iloc[0]) is False
+
+
+def test_cascade_shows_left_care_as_its_own_step_and_measures_gaps_without_it():
+    c = cohort([mk()], status="Death")                 # no EAC, never retested
+    steps = {s["step"]: s for s in cascade(c.df)}
+    assert steps[1]["n"] == 1                          # still in the cohort
+    assert steps[11]["n"] == 1                         # shown, and named
+    assert steps[12]["n"] == 0                         # not in the base
+    assert steps[2]["n"] == 0 and steps[2]["denominator"] == 0,         "a client who left care must not read as 'never commenced EAC'"
+
+
+def test_deep_dive_eac_status_names_left_care_rather_than_never_commenced():
+    from app.indicators import profile
+    p = profile(cohort([mk()], status="Transferred out").df)
+    levels = {d["level"]: d["n"] for d in p["what"]["eac_status"]}
+    assert levels.get("Left care before a repeat VL") == 1
+    assert levels.get("Never commenced", 0) == 0

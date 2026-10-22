@@ -1691,7 +1691,7 @@ function overview(o){
 
   $('#ovStats').innerHTML=[
     stat('Index cohort',fmt(o.n),fmt(o.clients)+' clients \u00b7 '+fmt(o.repeats)+' repeat unsuppression episodes'),
-    stat('Commenced EAC',pctOrNA(o.eac1_pct),fmt(o.eac1)+' of '+fmt(o.n)+' \u00b7 '+fmt(o.never_eac)+' never started',
+    stat('Commenced EAC',pctOrNA(o.eac1_pct),fmt(o.eac1)+' of '+fmt(o.in_care==null?o.n:o.in_care)+' \u00b7 '+fmt(o.never_eac)+' never started',
       o.eac1_pct<70?'bad':'good'),
     stat('Completed EAC',pctOrNA(o.completed_pct),fmt(o.completed)+' of '+fmt(o.eac1)+' commenced',
       o.completed_pct<50?'warn':'good'),
@@ -1787,7 +1787,7 @@ function overview(o){
   const mfLabels=['Female','Male'].concat(uk?['Unknown']:[]);
   const mfData=[d.female||0,d.male||0].concat(uk?[uk]:[]);
   const mfCols=[C.female,C.male].concat(uk?[C.rule]:[]);
-  const commenced=o.eac1||0, notC=Math.max(0,o.n-commenced);
+  const commenced=o.eac1||0, notC=Math.max(0,(o.in_care==null?o.n:o.in_care)-commenced);
   const bstates=o.by_state||[];
   const donut=(id,title,big,sub)=>'<div class="oc-d"><div class="oc-t">'+title+'</div>'
     +'<div class="oc-donut"><canvas id="'+id+'"></canvas>'
@@ -1795,7 +1795,7 @@ function overview(o){
     +'<div class="oc-leg" id="'+id+'Leg"></div></div>';
   $('#ovFunnel').innerHTML='<div class="oc-donuts">'
     + donut('cMF','Total unsuppressed by sex',fmt(o.n),'episodes')
-    + donut('cCommenced','Commenced EAC',pctOrNA(o.eac1_pct),fmt(commenced)+' of '+fmt(o.n))
+    + donut('cCommenced','Commenced EAC',pctOrNA(o.eac1_pct),fmt(commenced)+' of '+fmt(o.in_care==null?o.n:o.in_care))
     +'</div>'
     +'<div class="disagg-h">EAC commenced by state</div>'
     +(bstates.length
@@ -1976,7 +1976,9 @@ function cascade(steps){
   // clicking a cascade bar opens the worklist of clients lost at that step.
   const STEP_FLAG={2:'no_eac',6:'eac_incomplete',61:'awaiting_vl',
                    93:'awaiting_switch',10:'awaiting_switch'};
-  const N=steps[0].n, spine=[1,2,3,4,5,6,7,8];
+  // 11 = left care before a repeat VL (placed, not lost); 12 = the base still in
+  // care or retested, which every later step is measured on.
+  const N=steps[0].n, spine=[1,12,2,3,4,5,6,7,8];
   const seg=(w,c)=> w>0?'<span class="seg" style="width:'+w.toFixed(2)+'%;background:'+c+'"></span>':'';
   const legend='<div class="casc-leg">'
     +'<span><i style="background:#2a6f97"></i>Female (solid)</span>'
@@ -2005,7 +2007,7 @@ function cascade(steps){
   const g=k=>{const s=steps.filter(x=>x.step===k)[0]; return s?s.n:0;};
   const HN='#2c7da0', HH='#EBA01E', HB='#DC2626';   // neutral / amber / red
   const gaps=[
-    ['Never commenced EAC', g(1)-g(2), HN],
+    ['Never commenced EAC', (g(12)||g(1))-g(2), HN],
     ['Started, stopped before session 3', Math.max(0,g(2)-g(4)), HN],
     ['At session 3, not yet completed (<30 d)', Math.max(0,g(4)-g(6)), HH],
     ['Completed, no post-EAC VL sample', Math.max(0,g(6)-g(61)), HB],

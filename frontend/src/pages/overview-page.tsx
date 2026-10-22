@@ -139,14 +139,15 @@ function Headline({ data, trend, since }: { data: Ov; trend: Trend | null; since
       <KpiTile icon={Users} label="Index cohort" value={fmt(data.n)}
                sparkline={series('n')} sparkLabel="Episodes by enrolment quarter; the latest quarter is still filling"
                trend={tv?.cohort} better="neutral" since={since}
-               note={`${fmt(data.clients)} clients · ${fmt(data.repeats)} repeat episodes`}
+               note={`${fmt(data.clients)} clients · ${fmt(data.repeats)} repeat episodes`
+                     + (data.left_care_untested ? ` · ${fmt(data.left_care_untested)} left care before a repeat VL` : '')}
                definition="Every treatment-failure episode in the Total Unsuppressed register. The unit is the episode - S/N, index VL date and value - so a client unsuppressed twice counts twice." />
       <KpiTile icon={HeartHandshake} label="Commenced EAC" value={pc(data.eac1_pct)}
                sparkline={series('eac1_pct')} sparkLabel={span('eac1_pct', 'Commenced EAC')}
                trend={tv?.eac1} since={since}
-               note={`${fmt(data.eac1)} of ${fmt(data.n)} · ${fmt(data.never_eac)} never started`}
+               note={`${fmt(data.eac1)} of ${fmt(data.in_care ?? data.n)} · ${fmt(data.never_eac)} never started`}
                status={badge(rateTone(data.eac1_pct, 70, 'bad'))}
-               definition="Episodes with EAC session 1 recorded, over all episodes in the index cohort." />
+               definition="Episodes with EAC session 1 recorded, over episodes still in care or retested. Clients who left care before a repeat VL are not counted as a gap." />
       <KpiTile icon={CircleCheck} label="Completed EAC" value={pc(data.completed_pct)}
                sparkline={series('completed_pct')} sparkLabel={span('completed_pct', 'Completed EAC')}
                trend={tv?.completed} since={since}
@@ -161,9 +162,9 @@ function Headline({ data, trend, since }: { data: Ov; trend: Trend | null; since
       <KpiTile icon={Microscope} label="Follow-up VL done" value={pc(data.retest_pct)}
                sparkline={series('retest_pct')} sparkLabel={span('retest_pct', 'Follow-up VL done')}
                trend={tv?.retest} since={since}
-               note={`${fmt(data.retested)} of ${fmt(data.n)} · ${fmt(data.awaiting_retest)} with no later VL`}
+               note={`${fmt(data.retested)} of ${fmt(data.in_care ?? data.n)} · ${fmt(data.awaiting_retest)} with no later VL`}
                status={badge(rateTone(data.retest_pct, 50, 'bad'))}
-               definition="Episodes with any viral load sampled after the index result was received, over all episodes. Taken from the clinical line lists, never the EAC sheet." />
+               definition="Episodes with any viral load sampled after the index result was received, over episodes still in care or retested. Taken from the clinical line lists, never the EAC sheet." />
       <KpiTile icon={Activity} label="Re-suppressed" value={pc(data.resupp_pct)}
                sparkline={series('resupp_pct')} sparkLabel={span('resupp_pct', 'Re-suppressed')}
                trend={tv?.resupp} since={since}
@@ -281,6 +282,10 @@ function NarrativeRow({ data }: { data: Ov }) {
             on a first-line regimen with {pc(d.second_line_pct)} ({fmt(d.second_line)}) already on second-line.
           </p>
           <p>
+            {data.left_care_untested
+              ? `${fmt(data.left_care_untested)} episodes left care before a repeat viral load, and are
+                 counted apart from the gaps below. Of the ${fmt(data.in_care)} still in care or retested, `
+              : ''}
             {pc(data.eac1_pct)} ({fmt(data.eac1)}) have commenced EAC, and {pc(data.completed_pct)}{' '}
             ({fmt(data.completed)}) of those have completed it. Median time to EAC commencement is{' '}
             {d.median_time_to_eac != null ? `${d.median_time_to_eac} days` : DASH}, with an EAC lead
@@ -293,7 +298,7 @@ function NarrativeRow({ data }: { data: Ov }) {
             review; {fmt(data.switched)} have moved to second- or third-line. Re-suppression is{' '}
             {pc(sx['Female']?.pct)} in females versus {pc(sx['Male']?.pct)} in males
             {stateBits ? `, and by state runs ${stateBits}.` : '.'} The clearest gap is coverage, not
-            efficacy: only {pc(data.retest_pct)} of episodes have any follow-up VL on record, leaving{' '}
+            efficacy: only {pc(data.retest_pct)} of episodes still in care have any follow-up VL on record, leaving{' '}
             {fmt(data.awaiting_retest)} untested.
           </p>
         </CardContent>
@@ -525,6 +530,7 @@ function ResuppressionAndCascade({ data }: { data: Ov }) {
               <TableRow>
                 <TableHead>Quarter</TableHead>
                 <TableHead className="text-right">Episodes</TableHead>
+                <TableHead className="text-right">Left care</TableHead>
                 <TableHead className="text-right">EAC commenced</TableHead>
                 <TableHead className="text-right">EAC completed</TableHead>
                 <TableHead className="text-right">Follow-up VL</TableHead>
@@ -536,6 +542,7 @@ function ResuppressionAndCascade({ data }: { data: Ov }) {
                 <TableRow key={p.quarter}>
                   <TableCell className="font-medium">{p.quarter}</TableCell>
                   <TableCell className="text-right">{fmt(p.n)}</TableCell>
+                  <TableCell className="text-right text-muted-foreground">{fmt(p.left_care)}</TableCell>
                   <PairCell n={p.eac1} rate={p.eac1_pct} />
                   <PairCell n={p.completed} rate={p.completed_pct} />
                   <PairCell n={p.retested} rate={p.retest_pct} />
@@ -650,6 +657,7 @@ function Sources({ data, asofLong }: { data: Ov; asofLong: string }) {
     ['The cohort', 'a quarterly open cohort drawn from the Total Unsuppressed register.'],
     ['Viral loads', 'index and follow-up both come from the clinical line lists, never the EAC sheet.'],
     ['The follow-up VL', 'the next VL sampled after the index result was received.'],
+    ['Left care before a repeat VL', 'an ART status of LTFU, IIT, stopped, died, transferred out or discontinued, with no follow-up VL. Counted in the cohort but taken out of every gap measure, because no team action closes it; listed in its own worklist.'],
     ['EAC completed', 'sessions 1-3 recorded plus at least 30 days since session 3.'],
     ['Post-EAC VL', 'sessions 1-3 recorded and a viral load sample collected on or after session 3, irrespective of the 30-day rule, over episodes that completed EAC. A different indicator from the follow-up VL, which is any VL sampled after the index result.'],
   ]

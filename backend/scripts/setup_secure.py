@@ -85,17 +85,17 @@ def main() -> int:
     dataset = a.dataset or root / "TF_Dashboard_Dataset.xlsx"
     print(f"\n  working in: {root}")
 
-    for sub in ("eac", "backups", "output", "logs"):
+    for sub in ("treatment", "eac", "backups", "output", "logs"):
         (root / sub).mkdir(exist_ok=True)
-    print("  subfolders ready: eac, backups, output, logs")
+    print("  subfolders ready: treatment, eac, backups, output, logs")
 
-    # The treatment export is named with its date, so match on a pattern
-    # rather than a fixed name and take the most recent.
-    treats = sorted(root.glob(f"*{TREAT_PREFIX}*.xls*"),
+    # The treatment export is named with its date, so the config holds a
+    # pattern over the treatment folder and the pipeline takes the newest.
+    treats = sorted((root / "treatment").glob(f"*{TREAT_PREFIX}*.xls*"),
                     key=lambda p: p.stat().st_mtime, reverse=True)
-    treatment = treats[0] if treats else root / "ECEWS_Treatment_Linelist.xlsx"
+    treatment = root / "treatment" / f"*{TREAT_PREFIX}*.xls*"
     if treats:
-        print(f"  treatment list: {treatment.name}")
+        print(f"  treatment list: {treats[0].name}")
         if len(treats) > 1:
             print(f"                  ({len(treats) - 1} older one(s) ignored)")
 

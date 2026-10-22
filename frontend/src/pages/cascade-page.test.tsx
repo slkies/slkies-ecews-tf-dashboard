@@ -24,14 +24,16 @@ const s = (step: number, label: string, n: number, denominator: number, denomina
 
 export const STEPS: CascadeStep[] = [
   s(1, 'Total unsuppressed', 1000, 1000, '-'),
-  s(2, 'EAC commenced', 800, 1000, '#1'),
+  s(11, 'Left care before a repeat VL', 100, 1000, '#1'),
+  s(12, 'Still in care, or retested', 900, 1000, '#1'),
+  s(2, 'EAC commenced', 800, 900, '#1b'),
   s(3, 'EAC session 2', 700, 800, '#2'),
   s(4, 'EAC session 3', 600, 800, '#2'),
   s(5, 'Extended EAC (4+)', 50, 800, '#2'),
   s(6, 'EAC completed', 500, 800, '#2'),
   s(61, 'Post-EAC VL sample', 450, 600, '#4', 'Sessions 1-3 done AND a VL sample on/after session 3.'),
-  s(7, 'Follow-up VL sample', 700, 1000, '#1'),
-  s(8, 'Follow-up VL result', 650, 1000, '#1'),
+  s(7, 'Follow-up VL sample', 700, 900, '#1b'),
+  s(8, 'Follow-up VL result', 650, 900, '#1b'),
   s(9, 'Re-suppressed (<1,000)', 450, 650, '#8'),
   s(91, '- Undetectable (<50)', 300, 650, '#8'),
   s(92, '- LLV (50-999)', 150, 650, '#8'),
@@ -79,7 +81,8 @@ describe('Cascade page', () => {
 
   it('shows loss only where one step follows directly from another', async () => {
     draw()
-    expect(within(await stepRow('EAC commenced')).getByText('−200')).toBeInTheDocument()
+    // From the base still in care (900), not the whole cohort (1,000).
+    expect(within(await stepRow('EAC commenced')).getByText('−100')).toBeInTheDocument()
     expect(within(await stepRow('EAC completed')).getByText('−100')).toBeInTheDocument()   // from session 3
     // Extended EAC is not a drop from session 3, and a follow-up sample is not a drop from EAC.
     expect(within(await stepRow('Extended EAC (4+)')).queryByText(/−/)).not.toBeInTheDocument()
@@ -109,7 +112,10 @@ describe('Cascade page', () => {
     const { user, onOpenWorklist } = draw()
     const lost = await screen.findByRole('list', { name: 'Losses by gap' })
     const row = (label: string) => within(lost).getByText(label).closest('li')!
-    expect(within(row('Never commenced EAC')).getByText('200')).toBeInTheDocument()
+    expect(within(row('Never commenced EAC')).getByText('100')).toBeInTheDocument()
+    // Left care is shown, and opens its own worklist, but is not counted as a gap.
+    await user.click(within(row('Left care before a repeat VL')).getByRole('button'))
+    expect(onOpenWorklist).toHaveBeenCalledWith('exited_no_vl')
     expect(within(row('At session 3, not yet 30 days on')).getByText('100')).toBeInTheDocument()
     expect(within(row('Still unsuppressed, awaiting DTC review')).getByText('180')).toBeInTheDocument()
     // The 30-day wait is not a loss, so it has no worklist to open.
@@ -122,7 +128,7 @@ describe('Cascade page', () => {
     draw()
     const out = await screen.findByRole('list', { name: 'Follow-up VL outcome' })
     const n = within(out).getAllByRole('listitem').map((li) => Number(li.querySelector('.font-medium')!.textContent!.replace(/,/g, '')))
-    expect(n).toEqual([300, 150, 200, 350])
+    expect(n).toEqual([300, 150, 200, 250, 100])         // ...no result yet, still in care; left care
     expect(n.reduce((a, b) => a + b, 0)).toBe(1000)
   })
 })

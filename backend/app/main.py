@@ -547,15 +547,19 @@ def summary(u: U, f: F):
         return {"n": 0, "as_of": up["as_of"], "warnings": up["warnings"]}
     n, r = len(df), int(df["post_result"].sum())
     resupp = int(df["resuppressed"].sum())
+    base = ~ind.left_care_untested(df)
+    nb = int(base.sum())
+    e1 = int((df["eac1"] & base).sum())
     return {
         "n": n, "clients": int(df["sn"].nunique()),
+        "in_care": nb, "left_care_untested": n - nb,
         "as_of": up["as_of"], "filename": up["filename"],
         "warnings": up["warnings"],
-        "eac1": int(df["eac1"].sum()),
-        "eac1_pct": round(int(df["eac1"].sum()) / n * 100, 1),
-        "eac_completed": int(df["eac_completed"].sum()),
+        "eac1": e1,
+        "eac1_pct": round(e1 / nb * 100, 1) if nb else None,
+        "eac_completed": int((df["eac_completed"] & base).sum()),
         "post_result": r,
-        "post_result_pct": round(r / n * 100, 1),
+        "post_result_pct": round(r / nb * 100, 1) if nb else None,
         "resuppressed": resupp,
         "resupp_pct": round(resupp / r * 100, 1) if r else None,
         "still_unsuppressed": int(df["still_unsuppressed"].sum()),
@@ -608,18 +612,25 @@ def get_plans(u: U, f: F):
 
 
 # Deep-dive flags (spec §3) - each one is a facility worklist.
+# Gap worklists leave out clients who left care before a repeat VL: that is
+# not a gap a team can close, and they have their own list (exited_no_vl).
+# Same rule as the cascade and the Overview rates, so a list's count is the
+# gap shown beside it (indicators.left_care_untested, 22 Oct 2026).
+def _in_care(d):
+    return ~ind.left_care_untested(d)
+
+
 FLAGS = {
-    "no_eac": lambda d: ~d["eac1"],
-    "eac_incomplete": lambda d: d["eac1"] & ~d["eac_completed"],
+    "no_eac": lambda d: ~d["eac1"] & _in_care(d),
+    "eac_incomplete": lambda d: d["eac1"] & ~d["eac_completed"] & _in_care(d),
     # the new gap (team review): completed the course >=30 days ago but no VL
     # sample has been collected on/after session 3
-    "awaiting_vl": lambda d: d["eac_completed"] & ~d["post_eac_vl"],
+    "awaiting_vl": lambda d: d["eac_completed"] & ~d["post_eac_vl"] & _in_care(d),
     "awaiting_switch": lambda d: d["awaiting_switch"],
     "prior_switch": lambda d: d["prior_switch"],
     # left care (LTFU/died/IIT/stopped/transferred out) and never retested
-    "exited_no_vl": lambda d: ind.care_status(d).isin(ind._NEG_OUTCOMES)
-                              & ~d["post_result"].fillna(False).astype(bool),
-    "long_unsuppressed": lambda d: d["months_unsuppressed"] > 6,
+    "exited_no_vl": lambda d: ind.left_care_untested(d),
+    "long_unsuppressed": lambda d: (d["months_unsuppressed"] > 6) & _in_care(d),
     # Still in care, unsuppressed for over a year, and never retested. Distinct
     # from long_unsuppressed, which counts anyone past six months whether or not
     # a repeat has since come back, and from exited_no_vl, which is about people
@@ -629,7 +640,7 @@ FLAGS = {
         d["art_status"].astype("string").str.strip().str.casefold().eq("active")
         & (d["months_unsuppressed"] > 12)
         & ~d["post_result"].fillna(False).astype(bool)),
-    "dtc_review": lambda d: d["dtc_review"],
+    "dtc_review": lambda d: d["dtc_review"] & _in_care(d),
     # two separate truncation cohorts - see indicators.build_cohort
     "trunc_pre": lambda d: d["eac_trunc_pre"],
     "trunc_mid": lambda d: d["eac_trunc_mid"],
@@ -1298,22 +1309,32 @@ def overview(u: U, f: F):
     def rate(a, b):
         return round(a / b * 100, 1) if b else None
 
+    # Every GAP measure below - EAC uptake, completion, retesting - is taken
+    # over `dg`, the episodes still in care or retested. Clients who left care
+    # before a repeat VL are counted (left_care_untested) and have their own
+    # worklist, but are not a gap a team can close. `n` and the descriptive
+    # panels stay the whole cohort (indicators.left_care_untested).
+    gone = ind.left_care_untested(df)
+    dg = df[~gone]
+
     # ── progress by quarter: the maturation story ──────────────────────
     prog = []
     for q in sorted(x for x in df["enrol_quarter"].dropna().unique()):
         d = df[df["enrol_quarter"] == q]
         n = len(d)
-        e1 = int(d["eac1"].sum())
-        dn = int(d["eac_completed"].sum())
-        rs = int(d["post_result"].sum())
-        rr = int(d["resuppressed"].sum())
-        prog.append({"quarter": q, "n": n,
+        dq = dg[dg["enrol_quarter"] == q]
+        nb = len(dq)
+        e1 = int(dq["eac1"].sum())
+        dn = int(dq["eac_completed"].sum())
+        rs = int(dq["post_result"].sum())
+        rr = int(dq["resuppressed"].sum())
+        prog.append({"quarter": q, "n": n, "in_care": nb, "left_care": n - nb,
                      "n_female": int((d["sex"] == "Female").sum()),
                      "n_male": int((d["sex"] == "Male").sum()),
                      "eac1": e1, "completed": dn,
                      "retested": rs, "resuppressed": rr,
-                     "eac1_pct": rate(e1, n), "completed_pct": rate(dn, e1),
-                     "retest_pct": rate(rs, n), "resupp_pct": rate(rr, rs)})
+                     "eac1_pct": rate(e1, nb), "completed_pct": rate(dn, e1),
+                     "retest_pct": rate(rs, nb), "resupp_pct": rate(rr, rs)})
 
     # ── monthly incidence by sex, from Jul 2025 ────────────────────────
     # Monthly (not weekly): weekly was spiky and unreadable. Bucketed on
@@ -1401,7 +1422,7 @@ def overview(u: U, f: F):
     }
 
     # ── per-state summary for the outcome card's state bars ────────────────
-    st_grp = (df[df["state"].notna() & (df["state"] != "Unknown")]
+    st_grp = (dg[dg["state"].notna() & (dg["state"] != "Unknown")]
               .groupby("state")
               .agg(n=("sn", "size"), eac1=("eac1", "sum"),
                    completed=("eac_completed", "sum"),
@@ -1420,7 +1441,7 @@ def overview(u: U, f: F):
     # from one that was 88%, and the bars read identically in both cases.
     # Dated on the index result reaching the facility, the same clock as the
     # quarters and the month filter, so a dip here can be clicked into.
-    up_m = df.dropna(subset=["recv_date"]).copy()
+    up_m = dg.dropna(subset=["recv_date"]).copy()
     up_m["recv_date"] = pd.to_datetime(up_m["recv_date"], errors="coerce")
     up_m["_m"] = up_m["recv_date"].dt.to_period("M").dt.start_time
     mg = (up_m.groupby("_m")
@@ -1456,7 +1477,7 @@ def overview(u: U, f: F):
 
     # ── facility league ───────────────────────────────────────────────
     MIN_VOL = 20   # completion rates on <20 episodes are noise, not signal
-    fac = (df.groupby("facility")
+    fac = (dg.groupby("facility")
              .agg(n=("sn", "size"), eac1=("eac1", "sum"),
                   completed=("eac_completed", "sum"),
                   resupp=("resuppressed", "sum"))
@@ -1475,11 +1496,12 @@ def overview(u: U, f: F):
     # recorded - either way it is the highest-yield thing on this page.
     zero = fac[(fac["n"] >= MIN_VOL) & (fac["eac1"] == 0)].sort_values("n", ascending=False)
 
-    e1 = int(df["eac1"].sum())
-    dn = int(df["eac_completed"].sum())
-    rs = int(df["post_result"].sum())
-    rr = int(df["resuppressed"].sum())
-    still = int(df["still_unsuppressed"].sum())
+    nb = len(dg)
+    e1 = int(dg["eac1"].sum())
+    dn = int(dg["eac_completed"].sum())
+    rs = int(dg["post_result"].sum())
+    rr = int(dg["resuppressed"].sum())
+    still = int(dg["still_unsuppressed"].sum())
     # Switch denominator = still-unsuppressed episodes that were 1st line at the
     # index VL (switchable). Prior-switch (2nd/3rd at index) is a separate group.
     sw_elig = df[df["switch_eligible"].fillna(False).astype(bool)]
@@ -1494,14 +1516,16 @@ def overview(u: U, f: F):
         "repeat_clients": int((df["sn"].value_counts() > 1).sum()),  # clients with >1
         "as_of": up["as_of"],
         "warnings": up["warnings"],
-        "eac1": e1, "eac1_pct": rate(e1, n),
-        "never_eac": n - e1,
+        # The base every gap is measured on, and who was taken out of it.
+        "in_care": nb, "left_care_untested": n - nb,
+        "eac1": e1, "eac1_pct": rate(e1, nb),
+        "never_eac": nb - e1,
         "completed": dn, "completed_pct": rate(dn, e1),
-        "post_eac_vl": int(df["post_eac_vl"].fillna(False).astype(bool).sum()),
+        "post_eac_vl": int(dg["post_eac_vl"].fillna(False).astype(bool).sum()),
         # A follow-up VL is ANY later VL, so it is not conditional on EAC and
         # cannot be reported against the EAC denominator (that gave >100%).
-        "retested": rs, "retest_pct": rate(rs, n),
-        "awaiting_retest": n - rs,
+        "retested": rs, "retest_pct": rate(rs, nb),
+        "awaiting_retest": nb - rs,
         "resuppressed": rr, "resupp_pct": rate(rr, rs),
         "still_unsuppressed": still,
         "switch_eligible": len(sw_elig),
