@@ -17,6 +17,7 @@ import { ThemeProvider } from '@/core/theme'
 import WorklistsPage, { WORKLISTS, type ClientRow } from '@/pages/worklists-page'
 import '@/styles/fonts.css'
 import '@/index.css'
+import '@/styles/vibrant.css'
 
 try { sessionStorage.setItem('ecews.session', 'harness') } catch { /* ignore */ }
 

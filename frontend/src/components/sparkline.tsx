@@ -98,7 +98,7 @@ export function Sparkline({
     <svg width={width} height={height} viewBox={`0 0 ${width} ${height}`}
          role="img" aria-label={label} className="shrink-0 overflow-visible">
       {solid.length > 0 && (
-        <path d={toPath(solid)} fill="none" stroke="var(--primary)"
+        <path d={toPath(solid)} fill="none" stroke="var(--tile, var(--primary))"
               strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" />
       )}
       {provisionalLast && (
@@ -106,7 +106,7 @@ export function Sparkline({
               strokeWidth={2} strokeDasharray="3 3" strokeLinecap="round" />
       )}
       <circle cx={last[0]} cy={last[1]} r={2.75} fill="var(--card)"
-              stroke={provisionalLast ? 'var(--muted-foreground)' : 'var(--primary)'}
+              stroke={provisionalLast ? 'var(--muted-foreground)' : 'var(--tile, var(--primary))'}
               strokeWidth={2} />
     </svg>
   )

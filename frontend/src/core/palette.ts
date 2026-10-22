@@ -46,8 +46,37 @@ export function useChartPalette(): ChartPalette {
 }
 
 /** A CSS custom property's current value, for chart chrome that follows the
- *  page tokens (axis text, gridlines). */
+ *  page tokens (axis text, gridlines), resolved to rgba(). */
 export function cssVar(name: string, fallback: string): string {
   if (typeof document === 'undefined') return fallback
-  return getComputedStyle(document.documentElement).getPropertyValue(name).trim() || fallback
+  const raw = getComputedStyle(document.documentElement).getPropertyValue(name).trim()
+  return raw ? toRgba(raw) : fallback
+}
+
+let probe: CanvasRenderingContext2D | null | undefined
+
+/**
+ * Any CSS colour as rgba(), via a one-pixel canvas.
+ *
+ * The theme tokens are oklch. Chart.js re-parses colours with its own library,
+ * which does not read oklch's alpha: the dark theme's 10%-white gridline came
+ * out solid white (22 Oct 2026). Resolving through the browser first gives
+ * Chart.js a format it handles. Falls back to the input where there is no
+ * canvas (tests).
+ */
+export function toRgba(css: string): string {
+  if (probe === undefined) {
+    try {
+      const c = document.createElement('canvas')
+      c.width = c.height = 1
+      probe = c.getContext('2d', { willReadFrequently: true })
+    } catch { probe = null }
+  }
+  if (!probe) return css
+  probe.clearRect(0, 0, 1, 1)
+  probe.fillStyle = '#000'           // reset, so an unparseable value is caught below
+  probe.fillStyle = css
+  probe.fillRect(0, 0, 1, 1)
+  const [r, g, b, a] = probe.getImageData(0, 0, 1, 1).data
+  return `rgba(${r}, ${g}, ${b}, ${Math.round((a ?? 255) / 255 * 1000) / 1000})`
 }

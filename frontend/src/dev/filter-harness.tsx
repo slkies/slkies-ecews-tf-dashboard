@@ -13,6 +13,7 @@ import FilterBar from '@/components/filter-bar'
 import { TooltipProvider } from '@/components/ui/tooltip'
 import { FilterProvider, useFilters } from '@/core/filters'
 import '@/index.css'
+import '@/styles/vibrant.css'
 
 const OPTIONS = {
   states: ['Delta', 'Ekiti', 'Osun'],

@@ -2,6 +2,7 @@ import {
   Chart as ChartJS, type ChartConfiguration, registerables,
 } from 'chart.js'
 import { useEffect, useRef } from 'react'
+import { cssVar } from '../core/palette'
 import { useTheme } from '../core/theme'
 
 ChartJS.register(...registerables)
@@ -34,9 +35,9 @@ export default function Chart({ config, height = 290, ariaLabel }: {
 
     // Axis text and gridlines follow the shadcn tokens, so a chart reads as
     // part of the card it sits in, in either theme.
-    const css = getComputedStyle(document.documentElement)
-    const tick = css.getPropertyValue('--muted-foreground').trim() || '#7a796c'
-    const grid = css.getPropertyValue('--border').trim() || '#e6e5dd'
+    // Resolved to rgba(): Chart.js drops the alpha from oklch (core/palette).
+    const tick = cssVar('--muted-foreground', '#7a796c')
+    const grid = cssVar('--border', '#e6e5dd')
 
     ChartJS.defaults.color = tick
     ChartJS.defaults.borderColor = grid

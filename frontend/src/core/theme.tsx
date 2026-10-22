@@ -25,19 +25,35 @@ function initial(): Theme {
     ? 'dark' : 'light'
 }
 
+/**
+ * Put the theme on the root element NOW, not in an effect. Charts read the
+ * colour tokens while they render; applied in an effect, the class arrived
+ * after them, so a chart drawn on load or just after a switch used the other
+ * theme's colours - a white segment gap on a dark card (22 Oct 2026).
+ * shadcn keys dark mode off `.dark`; `data-theme` is kept for older readers.
+ */
+function apply(theme: Theme) {
+  document.documentElement.classList.toggle('dark', theme === 'dark')
+  document.documentElement.setAttribute('data-theme', theme)
+}
+
 export function ThemeProvider({ children }: { children: ReactNode }) {
-  const [theme, setTheme] = useState<Theme>(initial)
+  const [theme, setTheme] = useState<Theme>(() => {
+    const t = initial()
+    apply(t)
+    return t
+  })
 
   useEffect(() => {
-    // shadcn keys dark mode off a `.dark` class; `data-theme` is kept for
-    // anything still reading the attribute.
-    document.documentElement.classList.toggle('dark', theme === 'dark')
-    document.documentElement.setAttribute('data-theme', theme)
+    apply(theme)
     try { localStorage.setItem(STORAGE_KEY, theme) } catch { /* not fatal */ }
   }, [theme])
 
-  const toggle = useCallback(
-    () => setTheme((t) => (t === 'dark' ? 'light' : 'dark')), [])
+  const toggle = useCallback(() => setTheme((t) => {
+    const next = t === 'dark' ? 'light' : 'dark'
+    apply(next)
+    return next
+  }), [])
   const value = useMemo(() => ({ theme, toggle }), [theme, toggle])
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>
 }

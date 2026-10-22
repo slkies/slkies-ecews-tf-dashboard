@@ -1,0 +1,43 @@
+/*
+ * The "vibrant" layer (22 Oct 2026). One file, imported after index.css, so
+ * the whole look can be reverted by deleting its import in main.tsx.
+ *
+ * What it changes:
+ *   - brand green: more saturation, same hue, still >= 4.5:1 for white text;
+ *   - seven tile tints (--hue-1..7) for the KPI icon chips and sparklines,
+ *     the Clinova approach: identity, never status. Red, amber and green keep
+ *     their meanings through --bad / --warn / --good, which are untouched;
+ *   - chart accent follows the brighter green.
+ */
+:root {
+  --primary: oklch(0.52 0.125 163);
+  --ring: oklch(0.62 0.12 163);
+  --chart-1: oklch(0.52 0.125 163);
+  --sidebar-primary: oklch(0.52 0.125 163);
+  --accent: oklch(0.955 0.03 163);
+  --sidebar-accent: oklch(0.93 0.045 163);
+  --brand-tint: oklch(0.52 0.125 163 / 0.12);
+
+  --hue-1: oklch(0.55 0.17 255);   /* blue    - index cohort        */
+  --hue-2: oklch(0.56 0.11 200);   /* teal    - commenced EAC       */
+  --hue-3: oklch(0.52 0.16 275);   /* indigo  - completed EAC       */
+  --hue-4: oklch(0.54 0.18 305);   /* violet  - post-EAC VL sample  */
+  --hue-5: oklch(0.57 0.19 350);   /* magenta - follow-up VL done   */
+  --hue-6: oklch(0.54 0.13 155);   /* green   - re-suppressed       */
+  --hue-7: oklch(0.6 0.17 35);     /* coral   - awaiting DTC review */
+}
+
+.dark {
+  --primary: oklch(0.78 0.16 163);
+  --chart-1: oklch(0.78 0.16 163);
+  --sidebar-primary: oklch(0.78 0.16 163);
+  --brand-tint: oklch(0.78 0.16 163 / 0.14);
+
+  --hue-1: oklch(0.72 0.14 255);
+  --hue-2: oklch(0.76 0.11 200);
+  --hue-3: oklch(0.72 0.14 275);
+  --hue-4: oklch(0.74 0.15 305);
+  --hue-5: oklch(0.74 0.16 350);
+  --hue-6: oklch(0.78 0.14 155);
+  --hue-7: oklch(0.76 0.14 35);
+}

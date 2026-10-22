@@ -136,42 +136,42 @@ function Headline({ data, trend, since }: { data: Ov; trend: Trend | null; since
 
   return (
     <section aria-label="Headline indicators" className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-      <KpiTile icon={Users} label="Index cohort" value={fmt(data.n)}
+      <KpiTile hue={1} icon={Users} label="Index cohort" value={fmt(data.n)}
                sparkline={series('n')} sparkLabel="Episodes by enrolment quarter; the latest quarter is still filling"
                trend={tv?.cohort} better="neutral" since={since}
                note={`${fmt(data.clients)} clients · ${fmt(data.repeats)} repeat episodes`
                      + (data.left_care_untested ? ` · ${fmt(data.left_care_untested)} left care before a repeat VL` : '')}
                definition="Every treatment-failure episode in the Total Unsuppressed register. The unit is the episode - S/N, index VL date and value - so a client unsuppressed twice counts twice." />
-      <KpiTile icon={HeartHandshake} label="Commenced EAC" value={pc(data.eac1_pct)}
+      <KpiTile hue={2} icon={HeartHandshake} label="Commenced EAC" value={pc(data.eac1_pct)}
                sparkline={series('eac1_pct')} sparkLabel={span('eac1_pct', 'Commenced EAC')}
                trend={tv?.eac1} since={since}
                note={`${fmt(data.eac1)} of ${fmt(data.in_care ?? data.n)} · ${fmt(data.never_eac)} never started`}
                status={badge(rateTone(data.eac1_pct, 70, 'bad'))}
                definition="Episodes with EAC session 1 recorded, over episodes still in care or retested. Clients who left care before a repeat VL are not counted as a gap." />
-      <KpiTile icon={CircleCheck} label="Completed EAC" value={pc(data.completed_pct)}
+      <KpiTile hue={3} icon={CircleCheck} label="Completed EAC" value={pc(data.completed_pct)}
                sparkline={series('completed_pct')} sparkLabel={span('completed_pct', 'Completed EAC')}
                trend={tv?.completed} since={since}
                note={`${fmt(data.completed)} of ${fmt(data.eac1)} commenced`}
                status={badge(rateTone(data.completed_pct, 50, 'warn'))}
                definition="Sessions 1-3 recorded and at least 30 days since session 3, over episodes that commenced EAC." />
-      <KpiTile icon={TestTube} label="Post-EAC VL sample" value={pc(postEacPct)}
+      <KpiTile hue={4} icon={TestTube} label="Post-EAC VL sample" value={pc(postEacPct)}
                trend={tv?.postEac} since={since}
                note={`${fmt(data.post_eac_vl)} of ${fmt(data.completed)} who completed EAC`}
                status={badge(rateTone(postEacPct, 60, 'bad'))}
                definition="Sessions 1-3 plus a viral load sample on or after session 3, over episodes that completed EAC. A different indicator from the follow-up VL." />
-      <KpiTile icon={Microscope} label="Follow-up VL done" value={pc(data.retest_pct)}
+      <KpiTile hue={5} icon={Microscope} label="Follow-up VL done" value={pc(data.retest_pct)}
                sparkline={series('retest_pct')} sparkLabel={span('retest_pct', 'Follow-up VL done')}
                trend={tv?.retest} since={since}
                note={`${fmt(data.retested)} of ${fmt(data.in_care ?? data.n)} · ${fmt(data.awaiting_retest)} with no later VL`}
                status={badge(rateTone(data.retest_pct, 50, 'bad'))}
                definition="Episodes with any viral load sampled after the index result was received, over episodes still in care or retested. Taken from the clinical line lists, never the EAC sheet." />
-      <KpiTile icon={Activity} label="Re-suppressed" value={pc(data.resupp_pct)}
+      <KpiTile hue={6} icon={Activity} label="Re-suppressed" value={pc(data.resupp_pct)}
                sparkline={series('resupp_pct')} sparkLabel={span('resupp_pct', 'Re-suppressed')}
                trend={tv?.resupp} since={since}
                note={`${fmt(data.resuppressed)} of ${fmt(data.retested)} with a follow-up VL`}
                status={badge(rateTone(data.resupp_pct, 70, 'warn'))}
                definition="A follow-up viral load below 1,000 copies/mL, over episodes that have a follow-up VL." />
-      <KpiTile icon={Gavel} label="Awaiting DTC review" value={fmt(data.awaiting_switch)}
+      <KpiTile hue={7} icon={Gavel} label="Awaiting DTC review" value={fmt(data.awaiting_switch)}
                className="sm:col-span-2"
                note={`of ${fmt(data.still_unsuppressed)} episodes still at or above 1,000 copies/mL`}
                status={data.awaiting_switch
@@ -351,25 +351,40 @@ function ChartsRow({ data }: { data: Ov }) {
 
   const incidence = useMemo<ChartConfiguration | null>(() => {
     if (!w?.months?.length) return null
-    const line = (label: string, values: number[], color: string) => ({
-      label, data: values, borderColor: color, backgroundColor: color, borderWidth: 2,
-      pointRadius: 0, pointHoverRadius: 4,
+    // Monthly counts are discrete, so columns rather than a line: one column a
+    // month, female below and male above, so the column height is the month's
+    // total. The line list is drawn mid-month, so the last month is partial -
+    // drawn faded and labelled, never read as a fall.
+    const last = w.months.length - 1
+    const surface = cssVar('--card', '#ffffff')
+    const faded = (hex: string) => `${hex}59`
+    const col = (label: string, values: number[], color: string, top: boolean) => ({
+      label, data: values, stack: 'sex',
+      backgroundColor: values.map((_, i) => (i === last ? faded(color) : color)),
+      hoverBackgroundColor: color,
+      // a 2px surface gap between the two segments; rounded ends only at the top
+      borderColor: surface, borderWidth: top ? 0 : { top: 2 },
+      borderRadius: top ? { topLeft: 4, topRight: 4 } : 0, borderSkipped: false as const,
+      maxBarThickness: 30, categoryPercentage: 0.78, barPercentage: 0.9,
     })
     return {
-      type: 'line',
+      type: 'bar',
       data: { labels: w.months.map(fmtMonYY),
-              datasets: [line('Female', w.female, C.female), line('Male', w.male, C.male)] },
+              datasets: [col('Female', w.female, C.female, false), col('Male', w.male, C.male, true)] },
       options: {
         maintainAspectRatio: false,
         interaction: { mode: 'index', intersect: false },
         plugins: {
           legend: { display: false },
-          tooltip: { callbacks: { footer: (items) =>
-            `Total ${(items[0]?.parsed.y ?? 0) + (items[1]?.parsed.y ?? 0)}` } },
+          tooltip: { callbacks: {
+            title: (items) => `${items[0]?.label ?? ''}${items[0]?.dataIndex === last ? ' (partial month)' : ''}`,
+            footer: (items) => `Total ${fmt((items[0]?.parsed.y ?? 0) + (items[1]?.parsed.y ?? 0))}`,
+          } },
         },
         scales: {
-          x: { grid: { display: false }, border: { display: false }, ticks: { maxRotation: 0, autoSkipPadding: 12 } },
-          y: { beginAtZero: true, border: { display: false }, ticks: { precision: 0 } },
+          x: { stacked: true, grid: { display: false }, border: { display: false },
+               ticks: { maxRotation: 0, autoSkipPadding: 12 } },
+          y: { stacked: true, beginAtZero: true, border: { display: false }, ticks: { precision: 0 } },
         },
       },
     }
@@ -393,12 +408,12 @@ function ChartsRow({ data }: { data: Ov }) {
       <Card className="xl:col-span-2">
         <CardHeader>
           <CardTitle>New unsuppressed results by month</CardTitle>
-          <CardDescription>By sex, dated by result received at the facility, the same clock the fiscal quarters use.</CardDescription>
+          <CardDescription>By sex, dated by result received at the facility, the same clock the fiscal quarters use. The faded last column is a partial month.</CardDescription>
           <CardAction><Legend items={[{ label: 'Female', color: C.female }, { label: 'Male', color: C.male }]} /></CardAction>
         </CardHeader>
         <CardContent>
           {incidence
-            ? <Chart config={incidence} height={264} ariaLabel="Line chart of new unsuppressed results by month, female and male" />
+            ? <Chart config={incidence} height={264} ariaLabel="Column chart of new unsuppressed results by month, female stacked under male" />
             : <p className="py-10 text-center text-sm text-muted-foreground">No dated results in this selection.</p>}
         </CardContent>
         {incidence && (

@@ -1,5 +1,5 @@
 import { ArrowDown, ArrowUp, Info, Minus } from 'lucide-react'
-import type { ReactNode } from 'react'
+import type { CSSProperties, ReactNode } from 'react'
 import { cn } from 'cn'
 import { Sparkline } from '@/components/sparkline'
 import { Card, CardContent } from '@/components/ui/card'
@@ -48,8 +48,11 @@ export function TrendChip({ trend, better, since }: {
  */
 export function KpiTile({
   icon: Icon, label, value, definition, sparkline, sparkLabel,
-  trend, better = 'up', since, note, status, className, children,
+  trend, better = 'up', since, note, status, className, children, hue,
 }: {
+  /** Which tile tint (1-7, defined in styles/vibrant.css) colours the icon chip
+   *  and sparkline. Identity only - never status, which keeps its own colours. */
+  hue?: 1 | 2 | 3 | 4 | 5 | 6 | 7
   icon: typeof Info
   label: string
   value: string
@@ -65,10 +68,11 @@ export function KpiTile({
   children?: ReactNode
 }) {
   return (
-    <Card className={cn('gap-3', className)}>
+    <Card className={cn('gap-3', className)}
+          style={hue ? { '--tile': `var(--hue-${hue})` } as CSSProperties : undefined}>
       <CardContent className="flex h-full flex-col gap-3">
         <div className="flex items-start justify-between gap-3">
-          <span className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-brand-tint text-primary [&_svg]:size-[18px]">
+          <span className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-[color-mix(in_oklch,var(--tile,var(--primary))_14%,transparent)] text-[var(--tile,var(--primary))] [&_svg]:size-[18px]">
             <Icon aria-hidden />
           </span>
           {sparkline && (

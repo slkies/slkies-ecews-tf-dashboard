@@ -16,6 +16,7 @@ import { ThemeProvider } from '@/core/theme'
 import CascadePage, { type CascadeStep } from '@/pages/cascade-page'
 import '@/styles/fonts.css'
 import '@/index.css'
+import '@/styles/vibrant.css'
 
 try {
   sessionStorage.setItem('ecews.session', 'harness')
