@@ -65,7 +65,8 @@ export default function CascadePage({ onOpenWorklist }: { onOpenWorklist?: (flag
   const [steps, setSteps] = useState<CascadeStep[] | null>(null)
   const [loading, setLoading] = useState(true)
   const [err, setErr] = useState<string | null>(null)
-  const [bySex, setBySex] = useState(false)
+  // Stacked female / male by default, as on the main dashboard.
+  const [bySex, setBySex] = useState(true)
 
   useEffect(() => {
     if (!options) return
@@ -225,7 +226,7 @@ function StepBar({ step, N, bySex }: { step: CascadeStep; N: number; bySex: bool
     boxShadow: last ? undefined : '2px 0 0 0 var(--card)',
   })
   return (
-    <div className="flex h-3 w-full overflow-hidden rounded-[4px] bg-muted" aria-hidden>
+    <div className="flex h-9 w-full overflow-hidden rounded-lg bg-muted" aria-hidden>
       {bySex ? (
         <>
           <span className="h-full" style={seg(step.n_female, C.female, false)} />
@@ -233,7 +234,7 @@ function StepBar({ step, N, bySex }: { step: CascadeStep; N: number; bySex: bool
           {unknown > 0 && <span className="h-full" style={seg(unknown, C.unknown, true)} />}
         </>
       ) : (
-        <span className="h-full rounded-r-[4px]" style={{ width: `${share(step.n)}%`, background: tone }} />
+        <span className="h-full rounded-r-lg" style={{ width: `${share(step.n)}%`, background: tone }} />
       )}
     </div>
   )
@@ -288,8 +289,8 @@ function WhereLost({ steps, onOpenWorklist }: {
                   <ArrowRight className="size-3.5 shrink-0 text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100 group-focus-visible:opacity-100" aria-hidden />
                 </button>
               ) : <span className="text-sm text-muted-foreground">{x.label}</span>}
-              <div className="h-3 w-full rounded-[4px] bg-muted" aria-hidden>
-                <div className="h-full rounded-r-[4px]"
+              <div className="h-[18px] w-full rounded-[5px] bg-muted" aria-hidden>
+                <div className="h-full rounded-r-[5px]"
                      style={{ width: `${x.n / max * 100}%`,
                               background: x.pending ? 'var(--muted-foreground)' : 'var(--primary)',
                               opacity: x.pending ? 0.45 : 1 }} />
@@ -329,7 +330,7 @@ function Outcome({ steps }: { steps: CascadeStep[] }) {
         </CardDescription>
       </CardHeader>
       <CardContent className="flex flex-col gap-4">
-        <div className="flex h-4 w-full overflow-hidden rounded-[4px] bg-muted" aria-hidden>
+        <div className="flex h-[18px] w-full overflow-hidden rounded-[5px] bg-muted" aria-hidden>
           {parts.map((p, i) => (
             <span key={p.label} className="h-full"
                   style={{ width: `${share(p.n)}%`, background: p.color, opacity: p.faint ? 0.35 : 1,

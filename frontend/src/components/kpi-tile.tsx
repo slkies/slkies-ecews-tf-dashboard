@@ -68,20 +68,16 @@ export function KpiTile({
   children?: ReactNode
 }) {
   return (
-    <Card className={cn('gap-3', className)}
+    <Card size="sm" className={cn('gap-2', className)}
           style={hue ? { '--tile': `var(--hue-${hue})` } as CSSProperties : undefined}>
-      <CardContent className="flex h-full flex-col gap-3">
-        <div className="flex items-start justify-between gap-3">
-          <span className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-[color-mix(in_oklch,var(--tile,var(--primary))_14%,transparent)] text-[var(--tile,var(--primary))] [&_svg]:size-[18px]">
-            <Icon aria-hidden />
-          </span>
-          {sparkline && (
-            <Sparkline values={sparkline} label={sparkLabel ?? `${label} by enrolment quarter`} />
-          )}
-        </div>
-
-        <div className="flex flex-col gap-0.5">
-          <div className="flex items-center gap-1 text-sm text-muted-foreground">
+      {/* Compact (22 Oct 2026): icon and label share one row, and the corner
+          sparkline is gone - the quarterly trend is in the cascade table. */}
+      <CardContent className="flex h-full flex-col gap-2">
+        <div className="flex flex-col gap-1">
+          <div className="flex items-center gap-2 text-sm text-muted-foreground">
+            <span className="flex size-7 shrink-0 items-center justify-center rounded-md bg-[color-mix(in_oklch,var(--tile,var(--primary))_14%,transparent)] text-[var(--tile,var(--primary))] [&_svg]:size-4">
+              <Icon aria-hidden />
+            </span>
             <span>{label}</span>
             {definition && (
               <HoverCard>
@@ -98,6 +94,9 @@ export function KpiTile({
             <span className="text-2xl font-bold tracking-tight proportional-nums">{value}</span>
             <TrendChip trend={trend} better={better} since={since} />
           </div>
+          {sparkline && (
+            <Sparkline values={sparkline} label={sparkLabel ?? `${label} by enrolment quarter`} />
+          )}
         </div>
 
         <div className="mt-auto flex flex-wrap items-center justify-between gap-x-3 gap-y-1.5">

@@ -83,11 +83,13 @@ function Stat({ label, value, note, tone }: {
  * percentage. Rows rather than a donut - the levels are ordered and often close
  * together, which a donut reads badly, and every value is on the page.
  */
-function DistCard({ title, dist, highlight, note }: {
+function DistCard({ title, dist, highlight, colors, note }: {
   title: string
   dist: Dist[] | undefined
   /** Levels that carry meaning of their own, e.g. a priority age group. */
   highlight?: Record<string, 'bad' | 'warn'>
+  /** Fixed colours per level - sex uses the same female/male pair as every chart. */
+  colors?: Record<string, string>
   note?: string
 }) {
   return (
@@ -108,10 +110,11 @@ function DistCard({ title, dist, highlight, note }: {
                         title={r.level}>
                     {r.level}
                   </span>
-                  <span className="h-2 w-full rounded-[3px] bg-muted" aria-hidden>
-                    <span className="block h-full rounded-[3px]"
+                  <span className="h-3 w-full rounded-[4px] bg-muted" aria-hidden>
+                    <span className="block h-full rounded-[4px]"
                           style={{ width: `${Math.min(r.pct, 100)}%`,
-                                   background: tone ? `var(--${tone})`
+                                   background: colors?.[r.level] ? colors[r.level]
+                                     : tone ? `var(--${tone})`
                                      : quiet ? 'var(--muted-foreground)' : 'var(--primary)',
                                    opacity: quiet ? 0.5 : 1 }} />
                   </span>
@@ -188,19 +191,19 @@ export default function DeepDivePage({ onOpenWorklist }: { onOpenWorklist?: (fla
         labels: m.months.map(fmtMonYY),
         datasets: [
           {
-            label: 'Entered the cohort', data: m.n, borderColor: C.primary,
+            label: 'Entered the cohort', data: m.n, borderColor: C.series1,
             backgroundColor: 'transparent', borderWidth: 2, fill: false,
             // The line list is drawn mid-month, so the last month is partial.
             segment: {
-              borderColor: (c) => (c.p1DataIndex === last ? grey : C.primary),
+              borderColor: (c) => (c.p1DataIndex === last ? grey : C.series1),
               borderDash: (c) => (c.p1DataIndex === last ? [5, 4] : undefined),
             },
           },
           {
-            label: 'Left (follow-up result back)', data: m.exits, borderColor: C.female,
+            label: 'Left (follow-up result back)', data: m.exits, borderColor: C.series2,
             backgroundColor: 'transparent', borderWidth: 2, fill: false,
             segment: {
-              borderColor: (c) => (c.p1DataIndex === last ? grey : C.female),
+              borderColor: (c) => (c.p1DataIndex === last ? grey : C.series2),
               borderDash: (c) => (c.p1DataIndex === last ? [5, 4] : undefined),
             },
           },
@@ -285,7 +288,7 @@ export default function DeepDivePage({ onOpenWorklist }: { onOpenWorklist?: (fla
       <Section eyebrow="Who" title="The people behind the unsuppressed results"
                description="Composition of the cohort. Where a field is blank in the export it is shown as Not recorded rather than quietly dropped: the gap is itself a finding.">
         <div className={GRID}>
-          <DistCard title="Sex" dist={who.sex} />
+          <DistCard title="Sex" dist={who.sex} colors={{ Female: C.female, Male: C.male }} />
           <DistCard title="Age group" dist={who.age_group} note={`${under20.toFixed(1)}% are under 20`}
                     highlight={{ 'Under 10': 'bad', '10-19': 'warn' }} />
           <DistCard title="Age band" dist={who.age_band} />
@@ -326,8 +329,8 @@ export default function DeepDivePage({ onOpenWorklist }: { onOpenWorklist?: (fla
                     {care.breakdown.map((r) => (
                       <li key={r.level} className="grid grid-cols-[minmax(0,9rem)_minmax(0,1fr)_auto] items-center gap-3">
                         <span className="truncate text-xs" title={r.level}>{r.level}</span>
-                        <span className="h-2 w-full rounded-[3px] bg-muted" aria-hidden>
-                          <span className="block h-full rounded-[3px] bg-bad"
+                        <span className="h-3 w-full rounded-[4px] bg-muted" aria-hidden>
+                          <span className="block h-full rounded-[4px] bg-bad"
                                 style={{ width: `${Math.min(r.no_followup_vl / (care.neg_no_followup || 1) * 100, 100)}%` }} />
                         </span>
                         <span className="text-right text-xs tabular-nums">
@@ -362,10 +365,10 @@ export default function DeepDivePage({ onOpenWorklist }: { onOpenWorklist?: (fla
           <CardContent className="flex flex-col gap-3">
             <div className="flex flex-wrap items-center gap-3 text-xs text-muted-foreground">
               <span className="inline-flex items-center gap-1.5">
-                <span className="size-2.5 rounded-[3px]" style={{ background: C.primary }} />Entered
+                <span className="size-2.5 rounded-[3px]" style={{ background: C.series1 }} />Entered
               </span>
               <span className="inline-flex items-center gap-1.5">
-                <span className="size-2.5 rounded-[3px]" style={{ background: C.female }} />Left
+                <span className="size-2.5 rounded-[3px]" style={{ background: C.series2 }} />Left
               </span>
             </div>
             {monthly

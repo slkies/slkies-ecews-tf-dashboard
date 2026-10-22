@@ -20,6 +20,11 @@ export interface ChartPalette {
   primary: string      // brand green: single-series marks, sparklines
   female: string       // categorical slot 1
   male: string         // categorical slot 2
+  // A two-series chart that is NOT about sex (e.g. entering vs leaving) uses
+  // this pair, so it never borrows the female or male colour. Teal and indigo
+  // from the merged ramp, validated as a pair: CVD dE 16.8 light, both themes pass.
+  series1: string
+  series2: string
   unknown: string      // data gap, deliberately recessive
   provisional: string  // a period that has not finished happening
 }
@@ -28,6 +33,8 @@ export const PALETTE_LIGHT: ChartPalette = {
   primary: '#055B65',   // Octet deep teal
   female: '#0073a1',    // merged ramp, cool end - validated: CVD dE 18.3, normal 30.3, >= 3:1
   male: '#de6129',      // merged ramp, warm end
+  series1: '#008d6c',
+  series2: '#5e5bb6',
   unknown: '#d5dbdf',
   provisional: '#8794a0',
 }
@@ -36,6 +43,8 @@ export const PALETTE_DARK: ChartPalette = {
   primary: '#1BD488',   // Octet vivid green
   female: '#008cc0',    // validated on the dark card: CVD dE 19.0, normal 28.9
   male: '#e06b39',
+  series1: '#20a89b',
+  series2: '#8081d8',
   unknown: '#3a4145',
   provisional: '#8f9aa3',
 }

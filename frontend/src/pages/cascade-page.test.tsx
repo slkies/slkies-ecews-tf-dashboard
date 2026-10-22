@@ -96,16 +96,16 @@ describe('Cascade page', () => {
     expect(onOpenWorklist).toHaveBeenCalledWith('awaiting_vl')
   })
 
-  it('switches the bars to a split by sex, with a legend', async () => {
+  it('stacks the bars by sex by default, with a legend, and can show the total only', async () => {
     const { user } = draw()
     await screen.findByRole('list', { name: 'Cascade steps' })
-    expect(screen.queryByText('Sex not recorded')).not.toBeInTheDocument()
-    await user.click(screen.getByRole('button', { name: 'By sex' }))
     expect(screen.getByRole('button', { name: 'By sex' })).toHaveAttribute('aria-pressed', 'true')
     // The legend, not the filter bar's Female/Male toggle.
     const legend = screen.getByText('Sex not recorded').closest('div')!
     expect(within(legend).getByText('Female')).toBeInTheDocument()
     expect(within(legend).getByText('Male')).toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: 'All' }))
+    expect(screen.queryByText('Sex not recorded')).not.toBeInTheDocument()
   })
 
   it('counts the gaps where the cohort is lost, and links them to worklists', async () => {

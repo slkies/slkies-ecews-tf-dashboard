@@ -122,14 +122,6 @@ export default function OverviewPage({ data, times, trend, loading }: {
 /* ───────────────────────────────── headline tiles ─────────────────────────── */
 
 function Headline({ data, trend, since }: { data: Ov; trend: Trend | null; since?: string }) {
-  const q = data.progress ?? []
-  const series = (k: 'n' | 'eac1_pct' | 'completed_pct' | 'retest_pct' | 'resupp_pct') =>
-    q.map((p) => p[k] as number | null)
-  const span = (k: 'eac1_pct' | 'completed_pct' | 'retest_pct' | 'resupp_pct', label: string) => {
-    const first = q[0], last = q[q.length - 1]
-    if (!first || !last) return undefined
-    return `${label} by enrolment quarter, from ${pc(first[k])} in ${first.quarter} to ${pc(last[k])} in ${last.quarter}; the latest quarter is provisional`
-  }
   const postEacPct = data.completed ? (data.post_eac_vl / data.completed) * 100 : null
   const badge = (t: [Tone, string] | null) => t && <StatusBadge tone={t[0]}>{t[1]}</StatusBadge>
   const tv = trend?.values
@@ -137,19 +129,16 @@ function Headline({ data, trend, since }: { data: Ov; trend: Trend | null; since
   return (
     <section aria-label="Headline indicators" className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
       <KpiTile hue={1} icon={Users} label="Index cohort" value={fmt(data.n)}
-               sparkline={series('n')} sparkLabel="Episodes by enrolment quarter; the latest quarter is still filling"
                trend={tv?.cohort} better="neutral" since={since}
                note={`${fmt(data.clients)} clients · ${fmt(data.repeats)} repeat episodes`
                      + (data.left_care_untested ? ` · ${fmt(data.left_care_untested)} left care before a repeat VL` : '')}
                definition="Every treatment-failure episode in the Total Unsuppressed register. The unit is the episode - S/N, index VL date and value - so a client unsuppressed twice counts twice." />
       <KpiTile hue={2} icon={HeartHandshake} label="Commenced EAC" value={pc(data.eac1_pct)}
-               sparkline={series('eac1_pct')} sparkLabel={span('eac1_pct', 'Commenced EAC')}
                trend={tv?.eac1} since={since}
                note={`${fmt(data.eac1)} of ${fmt(data.in_care ?? data.n)} · ${fmt(data.never_eac)} never started`}
                status={badge(rateTone(data.eac1_pct, 70, 'bad'))}
                definition="Episodes with EAC session 1 recorded, over episodes still in care or retested. Clients who left care before a repeat VL are not counted as a gap." />
       <KpiTile hue={3} icon={CircleCheck} label="Completed EAC" value={pc(data.completed_pct)}
-               sparkline={series('completed_pct')} sparkLabel={span('completed_pct', 'Completed EAC')}
                trend={tv?.completed} since={since}
                note={`${fmt(data.completed)} of ${fmt(data.eac1)} commenced`}
                status={badge(rateTone(data.completed_pct, 50, 'warn'))}
@@ -160,13 +149,11 @@ function Headline({ data, trend, since }: { data: Ov; trend: Trend | null; since
                status={badge(rateTone(postEacPct, 60, 'bad'))}
                definition="Sessions 1-3 plus a viral load sample on or after session 3, over episodes that completed EAC. A different indicator from the follow-up VL." />
       <KpiTile hue={5} icon={Microscope} label="Follow-up VL done" value={pc(data.retest_pct)}
-               sparkline={series('retest_pct')} sparkLabel={span('retest_pct', 'Follow-up VL done')}
                trend={tv?.retest} since={since}
                note={`${fmt(data.retested)} of ${fmt(data.in_care ?? data.n)} · ${fmt(data.awaiting_retest)} with no later VL`}
                status={badge(rateTone(data.retest_pct, 50, 'bad'))}
                definition="Episodes with any viral load sampled after the index result was received, over episodes still in care or retested. Taken from the clinical line lists, never the EAC sheet." />
       <KpiTile hue={6} icon={Activity} label="Re-suppressed" value={pc(data.resupp_pct)}
-               sparkline={series('resupp_pct')} sparkLabel={span('resupp_pct', 'Re-suppressed')}
                trend={tv?.resupp} since={since}
                note={`${fmt(data.resuppressed)} of ${fmt(data.retested)} with a follow-up VL`}
                status={badge(rateTone(data.resupp_pct, 70, 'warn'))}
@@ -434,7 +421,7 @@ function ChartsRow({ data }: { data: Ov }) {
         <CardContent className="flex flex-col gap-5">
           <div className="flex flex-col gap-2">
             <span className="text-xs font-medium tracking-[0.08em] text-muted-foreground uppercase">Cohort by sex</span>
-            <div className="flex h-2.5 w-full gap-0.5 overflow-hidden rounded-full" role="img"
+            <div className="flex h-[18px] w-full gap-0.5 overflow-hidden rounded-[5px]" role="img"
                  aria-label={split.map((s) => `${s.label} ${fmt(s.n)}`).join(', ')}>
               {split.map((s) => (
                 <span key={s.label} style={{ width: `${(s.n / (data.n || 1)) * 100}%`, background: s.color }} />
@@ -455,8 +442,8 @@ function ChartsRow({ data }: { data: Ov }) {
             {data.by_state?.length ? data.by_state.map((s) => (
               <div key={s.state} className="grid grid-cols-[5.5rem_1fr_auto] items-center gap-3 text-sm">
                 <span className="truncate">{s.state}</span>
-                <span className="h-2 overflow-hidden rounded-full bg-muted">
-                  <span className="block h-full rounded-full bg-primary"
+                <span className="h-3 overflow-hidden rounded-[4px] bg-muted">
+                  <span className="block h-full rounded-[4px] bg-primary"
                         style={{ width: `${Math.min(s.eac1_pct ?? 0, 100)}%` }} />
                 </span>
                 <span className="w-24 text-right tabular-nums">

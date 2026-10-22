@@ -292,7 +292,7 @@ export default function DtcPage({ onOpenWorklist }: { onOpenWorklist?: (flag: st
                         <span className="tabular-nums"><span className="font-medium">{fmt(r.awaiting)}</span>
                           <span className="text-muted-foreground"> awaiting of {fmt(r.still)}</span></span>
                       </div>
-                      <div className="flex h-3 w-full overflow-hidden rounded-[4px] bg-muted" aria-hidden>
+                      <div className="flex h-[18px] w-full overflow-hidden rounded-[5px] bg-muted" aria-hidden>
                         {seg(r.awaiting, 'var(--bad)')}{seg(r.prior, 'var(--warn)')}{seg(r.switched, 'var(--primary)', true)}
                       </div>
                     </li>
@@ -363,8 +363,8 @@ export default function DtcPage({ onOpenWorklist }: { onOpenWorklist?: (flag: st
                         <span className="tabular-nums"><span className="font-medium">{fmt(b.n)}</span>
                           <span className="ml-2 text-muted-foreground">{pc(b.pct)}</span></span>
                       </div>
-                      <span className="h-3 w-full rounded-[4px] bg-muted" aria-hidden>
-                        <span className="block h-full rounded-[4px]"
+                      <span className="h-[18px] w-full rounded-[5px] bg-muted" aria-hidden>
+                        <span className="block h-full rounded-[5px]"
                               style={{ width: `${b.n / bandMax * 100}%`, background: LOG_TONE[b.band] ?? 'var(--primary)' }} />
                       </span>
                       {b.completed_eac > 0 && (
