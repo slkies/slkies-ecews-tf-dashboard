@@ -25,7 +25,16 @@ import { WORKLISTS } from './worklists-page'
 
 /* ─────────────────────────────────── types ─────────────────────────────────── */
 
-export interface Dist { level: string; n: number; pct: number }
+export interface Dist { level: string; n: number; pct: number; n_female?: number; n_male?: number }
+
+/** Clients entering and leaving the unsuppressed cohort (indicators.cohort_flow). */
+export interface Flow {
+  months: string[]
+  entered_new: number[]; entered_again: number[]
+  left_resuppressed: number[]; left_care: number[]
+  in_cohort: number[]; in_cohort_at_start: number
+  undated_left_care: number; resuppression_dated_by_sample: number
+}
 interface Quart { n: number; median: number; q1: number; q3: number }
 
 export interface Profile {
@@ -43,6 +52,7 @@ export interface Profile {
   }
   when: {
     monthly: { months: string[]; n: number[]; exits: number[] }
+    flow?: Flow
     wait: (Quart & { pending: number }) | null
     quarter: Dist[]; time_to_first_vl: Dist[]; yrs_to_unsupp: Dist[]
     time_to_eac: Dist[]; months_unsupp: Dist[]
@@ -92,6 +102,7 @@ function DistCard({ title, dist, highlight, colors, note }: {
   colors?: Record<string, string>
   note?: string
 }) {
+  const C = useChartPalette()
   return (
     <Card size="sm" className="min-w-0">
       <CardHeader>
@@ -100,26 +111,40 @@ function DistCard({ title, dist, highlight, colors, note }: {
       </CardHeader>
       <CardContent>
         {dist?.length ? (
-          <ul className="flex flex-col gap-2">
+          <ul className="flex flex-col gap-2.5">
             {dist.map((r) => {
               const tone = highlight?.[r.level]
               const quiet = r.level === 'Not recorded' || r.level === 'Unknown'
               return (
-                <li key={r.level} className="grid grid-cols-[minmax(0,9rem)_minmax(0,1fr)_auto] items-center gap-3">
-                  <span className={cn('truncate text-xs', quiet ? 'text-muted-foreground' : 'text-foreground')}
-                        title={r.level}>
-                    {r.level}
-                  </span>
-                  <span className="h-3 w-full rounded-[4px] bg-muted" aria-hidden>
-                    <span className="block h-full rounded-[4px]"
-                          style={{ width: `${Math.min(r.pct, 100)}%`,
-                                   background: colors?.[r.level] ? colors[r.level]
-                                     : tone ? `var(--${tone})`
-                                     : quiet ? 'var(--muted-foreground)' : 'var(--primary)',
-                                   opacity: quiet ? 0.5 : 1 }} />
-                  </span>
-                  <span className="text-right text-xs tabular-nums">
-                    {fmt(r.n)}<span className="ml-1.5 text-muted-foreground">{r.pct}%</span>
+                <li key={r.level} className="flex flex-col gap-1">
+                  {/* Label and figures on one line, the bar full width beneath - the main
+                      dashboard's layout, so the bar gets the card's whole width. A priority
+                      level (e.g. under 10) is marked on its label, so the bar can keep the
+                      female / male colours every chart uses. */}
+                  <div className="flex items-baseline justify-between gap-3">
+                    <span className={cn('truncate text-xs',
+                                        tone ? `font-medium text-${tone}` : quiet ? 'text-muted-foreground' : 'text-foreground')}
+                          title={r.level}>
+                      {r.level}
+                    </span>
+                    <span className="shrink-0 text-right text-xs tabular-nums">
+                      {fmt(r.n)}<span className="ml-1.5 text-muted-foreground">{r.pct}%</span>
+                    </span>
+                  </div>
+                  <span className="flex h-4 w-full overflow-hidden rounded-[4px] bg-muted" aria-hidden>
+                    {r.n_female != null && r.n_male != null && !colors ? (
+                      <span className="flex h-full overflow-hidden rounded-[4px]"
+                            style={{ width: `${Math.min(r.pct, 100)}%`, opacity: quiet ? 0.6 : 1 }}>
+                        <SexSegments n={r.n} f={r.n_female} m={r.n_male} C={C} />
+                      </span>
+                    ) : (
+                      <span className="block h-full rounded-[4px]"
+                            style={{ width: `${Math.min(r.pct, 100)}%`,
+                                     background: colors?.[r.level] ? colors[r.level]
+                                       : tone ? `var(--${tone})`
+                                       : quiet ? 'var(--muted-foreground)' : 'var(--primary)',
+                                     opacity: quiet ? 0.5 : 1 }} />
+                    )}
                   </span>
                 </li>
               )
@@ -128,6 +153,34 @@ function DistCard({ title, dist, highlight, colors, note }: {
         ) : <p className="py-4 text-center text-xs text-muted-foreground">Not available.</p>}
       </CardContent>
     </Card>
+  )
+}
+
+/** Female, male, then not recorded, with a 2px surface gap between them. */
+function SexSegments({ n, f, m, C }: { n: number; f: number; m: number; C: ReturnType<typeof useChartPalette> }) {
+  const u = Math.max(0, n - f - m)
+  const w = (v: number) => `${n ? (v / n) * 100 : 0}%`
+  const gap = '2px 0 0 0 var(--card)'
+  return (
+    <>
+      <span className="h-full" style={{ width: w(f), background: C.female, boxShadow: m || u ? gap : undefined }} />
+      <span className="h-full" style={{ width: w(m), background: C.male, boxShadow: u ? gap : undefined }} />
+      {u > 0 && <span className="h-full" style={{ width: w(u), background: C.unknown }} />}
+    </>
+  )
+}
+
+function SexLegend() {
+  const C = useChartPalette()
+  return (
+    <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-muted-foreground">
+      <span>Bars are split by sex:</span>
+      {[['Female', C.female], ['Male', C.male], ['Not recorded', C.unknown]].map(([l, c]) => (
+        <span key={l} className="inline-flex items-center gap-1.5">
+          <span className="size-2.5 rounded-[3px]" style={{ background: c }} aria-hidden />{l}
+        </span>
+      ))}
+    </div>
   )
 }
 
@@ -179,47 +232,70 @@ export default function DeepDivePage({ onOpenWorklist }: { onOpenWorklist?: (fla
     return () => { off = true }
   }, [query, options])
 
-  const monthly = useMemo<ChartConfiguration | null>(() => {
-    // An empty selection comes back as {"n": 0} with no sections at all.
-    const m = p?.when?.monthly
-    if (!m?.months?.length) return null
-    const last = m.months.length - 1
+  // Entering above the line, leaving below it; the line list is drawn
+  // mid-month, so the last month is partial and drawn faded.
+  const flowCharts = useMemo<{ flows: ChartConfiguration; stock: ChartConfiguration } | null>(() => {
+    const f = p?.when?.flow   // an empty selection comes back as {"n": 0}
+    if (!f?.months?.length) return null
+    const last = f.months.length - 1
+    const labels = f.months.map(fmtMonYY)
+    const good = cssVar('--good', '#2f7d4f')
     const grey = cssVar('--muted-foreground', C.provisional)
+    const fade = (c: string, a = 0.35) => c.startsWith('rgba(')
+      ? c.replace(/,\s*[\d.]+\)$/, `, ${a})`)
+      : `${c}${Math.round(a * 255).toString(16).padStart(2, '0')}`
+    const col = (label: string, values: number[], color: string, out = false) => ({
+      label, stack: 'flow',
+      data: values.map((v) => (out ? -v : v)),
+      backgroundColor: values.map((_, i) => (i === last ? fade(color) : color)),
+      borderColor: cssVar('--card', '#ffffff'), borderWidth: 1, borderSkipped: false as const,
+      maxBarThickness: 30, categoryPercentage: 0.78, barPercentage: 0.9,
+    })
+    const abs = (v: number | string) => fmt(Math.abs(Number(v)))
     return {
-      type: 'line',
-      data: {
-        labels: m.months.map(fmtMonYY),
-        datasets: [
-          {
-            label: 'Entered the cohort', data: m.n, borderColor: C.series1,
-            backgroundColor: 'transparent', borderWidth: 2, fill: false,
-            // The line list is drawn mid-month, so the last month is partial.
-            segment: {
-              borderColor: (c) => (c.p1DataIndex === last ? grey : C.series1),
-              borderDash: (c) => (c.p1DataIndex === last ? [5, 4] : undefined),
-            },
+      flows: {
+        type: 'bar',
+        data: { labels, datasets: [
+          col('Entered, first time', f.entered_new, C.series2),
+          col('Entered again, after re-suppressing', f.entered_again, fade(C.series2, 0.55)),
+          col('Left: re-suppressed', f.left_resuppressed, good, true),
+          col('Left care before a repeat VL', f.left_care, grey, true),
+        ] },
+        options: {
+          maintainAspectRatio: false,
+          interaction: { mode: 'index', intersect: false },
+          plugins: {
+            legend: { display: false },
+            tooltip: { callbacks: {
+              title: (it) => `${it[0]?.label ?? ''}${it[0]?.dataIndex === last ? ' (partial month)' : ''}`,
+              label: (i) => `${i.dataset.label}: ${abs(i.parsed.y)}`,
+            } },
           },
-          {
-            label: 'Left (follow-up result back)', data: m.exits, borderColor: C.series2,
-            backgroundColor: 'transparent', borderWidth: 2, fill: false,
-            segment: {
-              borderColor: (c) => (c.p1DataIndex === last ? grey : C.series2),
-              borderDash: (c) => (c.p1DataIndex === last ? [5, 4] : undefined),
-            },
+          scales: {
+            x: { stacked: true, grid: { display: false }, border: { display: false },
+                 ticks: { maxRotation: 0, autoSkipPadding: 12 } },
+            y: { stacked: true, border: { display: false },
+                 ticks: { precision: 0, callback: (v) => abs(v) },
+                 grid: { color: (c) => (c.tick.value === 0 ? grey : cssVar('--border', '#e6e5dd')) },
+                 title: { display: true, text: 'Clients per month' } },
           },
-        ],
-      },
-      options: {
-        maintainAspectRatio: false,
-        interaction: { mode: 'index', intersect: false },
-        plugins: {
-          legend: { display: false },
-          tooltip: { callbacks: { label: (i) => `${i.dataset.label}: ${fmt(i.parsed.y)} episodes`
-            + (i.dataIndex === last ? ' (partial month)' : '') } },
         },
-        scales: {
-          x: { grid: { display: false }, border: { display: false }, ticks: { maxRotation: 0, autoSkipPadding: 12 } },
-          y: { beginAtZero: true, border: { display: false }, title: { display: true, text: 'Episodes per month' } },
+      },
+      stock: {
+        type: 'line',
+        data: { labels, datasets: [{
+          label: 'In the cohort at month end', data: f.in_cohort, borderColor: C.series1,
+          backgroundColor: fade(C.series1, 0.12), fill: true, borderWidth: 2,
+          segment: { borderDash: (c) => (c.p1DataIndex === last ? [5, 4] : undefined) },
+        }] },
+        options: {
+          maintainAspectRatio: false,
+          plugins: { legend: { display: false },
+                     tooltip: { callbacks: { label: (i) => `${fmt(i.parsed.y)} clients in the cohort` } } },
+          scales: {
+            x: { grid: { display: false }, border: { display: false }, ticks: { maxRotation: 0, autoSkipPadding: 12 } },
+            y: { beginAtZero: true, border: { display: false }, ticks: { precision: 0 } },
+          },
         },
       },
     }
@@ -284,6 +360,8 @@ export default function DeepDivePage({ onOpenWorklist }: { onOpenWorklist?: (fla
         <Stat label="Median months unsuppressed" value={when.mu_stats ? String(when.mu_stats.median) : DASH}
               note="since the index VL" tone="warn" />
       </div>
+
+      <SexLegend />
 
       <Section eyebrow="Who" title="The people behind the unsuppressed results"
                description="Composition of the cohort. Where a field is blank in the export it is shown as Not recorded rather than quietly dropped: the gap is itself a finding.">
@@ -355,27 +433,53 @@ export default function DeepDivePage({ onOpenWorklist }: { onOpenWorklist?: (fla
 
       <Section eyebrow="When" title="Timing - when they entered and how long they wait"
                description="Dated by result received at the facility. The final month is partial, because the line list was drawn mid-month, so it is dashed rather than read as a fall.">
-        <Card>
-          <CardHeader>
-            <CardTitle>Episodes entering and leaving the cohort</CardTitle>
-            <CardDescription>
-              An episode enters on an unsuppressed result and leaves when the repeat result comes back.
-            </CardDescription>
-          </CardHeader>
-          <CardContent className="flex flex-col gap-3">
-            <div className="flex flex-wrap items-center gap-3 text-xs text-muted-foreground">
-              <span className="inline-flex items-center gap-1.5">
-                <span className="size-2.5 rounded-[3px]" style={{ background: C.series1 }} />Entered
-              </span>
-              <span className="inline-flex items-center gap-1.5">
-                <span className="size-2.5 rounded-[3px]" style={{ background: C.series2 }} />Left
-              </span>
-            </div>
-            {monthly
-              ? <Chart config={monthly} height={260} ariaLabel="Monthly episodes entering and leaving the cohort" />
-              : <p className="py-10 text-center text-sm text-muted-foreground">No dated results in this selection.</p>}
-          </CardContent>
-        </Card>
+        <div className="grid gap-4 xl:grid-cols-[minmax(0,3fr)_minmax(0,2fr)]">
+          <Card className="min-w-0">
+            <CardHeader>
+              <CardTitle>Clients entering and leaving the cohort</CardTitle>
+              <CardDescription>
+                A client enters on an unsuppressed result and leaves when it is resolved: a repeat VL
+                below 1,000, or leaving care before one. A repeat result still at or above 1,000
+                keeps them in. Entries above the line, exits below it.
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="flex flex-col gap-3">
+              <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-muted-foreground">
+                {[['Entered, first time', C.series2], ['Entered again', `${C.series2}8c`],
+                  ['Left: re-suppressed', 'var(--good)'], ['Left care before a repeat VL', 'var(--muted-foreground)']]
+                  .map(([l, c]) => (
+                    <span key={l} className="inline-flex items-center gap-1.5">
+                      <span className="size-2.5 rounded-[3px]" style={{ background: c }} aria-hidden />{l}
+                    </span>
+                  ))}
+              </div>
+              {flowCharts
+                ? <Chart config={flowCharts.flows} height={280}
+                         ariaLabel="Monthly clients entering the cohort above the line, and leaving it below by re-suppression or leaving care" />
+                : <p className="py-10 text-center text-sm text-muted-foreground">No dated results in this selection.</p>}
+              {when.flow && when.flow.resuppression_dated_by_sample > 0 && (
+                <p className="text-xs text-muted-foreground">
+                  {fmt(when.flow.resuppression_dated_by_sample)} re-suppressions are dated by the follow-up sample,
+                  because the date the result reached the facility is blank in this upload.
+                </p>
+              )}
+            </CardContent>
+          </Card>
+          <Card className="min-w-0">
+            <CardHeader>
+              <CardTitle>In the cohort at month end</CardTitle>
+              <CardDescription>
+                Clients still unsuppressed at the end of each month
+                {when.flow ? `, including ${fmt(when.flow.in_cohort_at_start)} who entered before the first month shown` : ''}.
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              {flowCharts
+                ? <Chart config={flowCharts.stock} height={280} ariaLabel="Clients in the unsuppressed cohort at each month's end" />
+                : <p className="py-10 text-center text-sm text-muted-foreground">No dated results in this selection.</p>}
+            </CardContent>
+          </Card>
+        </div>
         <div className={GRID}>
           <DistCard title="Enrolment quarter" dist={when.quarter} />
           <DistCard title="Months unsuppressed" dist={when.months_unsupp} />

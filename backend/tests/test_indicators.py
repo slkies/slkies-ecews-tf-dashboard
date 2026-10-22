@@ -578,3 +578,42 @@ def test_deep_dive_eac_status_names_left_care_rather_than_never_commenced():
     levels = {d["level"]: d["n"] for d in p["what"]["eac_status"]}
     assert levels.get("Left care before a repeat VL") == 1
     assert levels.get("Never commenced", 0) == 0
+
+
+# ── the cohort flow: clients entering and leaving, per client ──────────
+def test_cohort_flow_enters_on_unsuppressed_and_leaves_only_when_resolved():
+    from app.indicators import cohort_flow
+    df = pd.DataFrame([
+        # A: enters Aug, re-suppressed Oct (result date blank -> sample date)
+        {"sn": "A", "recv_date": "2025-08-10", "fu_date": None, "fu_samp": "2025-10-05",
+         "resuppressed": True, "post_result": True, "art_status": "Active", "exit_date": None},
+        # A again: unsuppressed in Dec after re-suppressing -> enters again
+        {"sn": "A", "recv_date": "2025-12-03", "fu_date": None, "fu_samp": None,
+         "resuppressed": False, "post_result": False, "art_status": "Active", "exit_date": None},
+        # B: enters Aug; a repeat result still >= 1,000 in Sep keeps B in
+        {"sn": "B", "recv_date": "2025-08-20", "fu_date": None, "fu_samp": "2025-09-15",
+         "resuppressed": False, "post_result": True, "art_status": "Active", "exit_date": None},
+        {"sn": "B", "recv_date": "2025-09-25", "fu_date": None, "fu_samp": None,
+         "resuppressed": False, "post_result": False, "art_status": "Active", "exit_date": None},
+        # C: enters Sep, leaves care in Nov before any repeat VL
+        {"sn": "C", "recv_date": "2025-09-02", "fu_date": None, "fu_samp": None,
+         "resuppressed": False, "post_result": False, "art_status": "LTFU", "exit_date": "2025-11-20"},
+    ])
+    f = cohort_flow(df, start="2025-08-01")
+    m = {mo[:7]: i for i, mo in enumerate(f["months"])}
+    assert f["entered_new"][m["2025-08"]] == 2 and f["entered_new"][m["2025-09"]] == 1
+    assert sum(f["entered_new"]) == 3, "B's repeat >=1,000 result is not a new entry"
+    assert f["entered_again"][m["2025-12"]] == 1
+    assert f["left_resuppressed"][m["2025-10"]] == 1
+    assert f["left_care"][m["2025-11"]] == 1
+    assert f["in_cohort"][m["2025-09"]] == 3            # A, B, C
+    assert f["in_cohort"][m["2025-11"]] == 1            # A re-suppressed, C left: B remains
+    assert f["in_cohort"][m["2025-12"]] == 2            # A is back
+    assert f["resuppression_dated_by_sample"] == 1
+
+
+def test_profile_distributions_carry_a_sex_split():
+    from app.indicators import profile
+    p = profile(cohort([mk()], status="Active").df)
+    row = p["who"]["age_band"][0]
+    assert {"n_female", "n_male"} <= set(row) and row["n_female"] + row["n_male"] <= row["n"]

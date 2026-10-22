@@ -1025,8 +1025,12 @@ def kaplan_meier(df: pd.DataFrame) -> list[dict]:
 # Pure composition of the unsuppressed cohort — counts and shares, no models
 # and no inference. The inferential work lives in deep_dive() / advanced.
 
-def _dist(s, order=None, top=None, na="Not recorded") -> list[dict]:
-    """Distribution of a series as [{level, n, pct}], honouring a fixed order."""
+def _dist(s, order=None, top=None, na="Not recorded", sex=None) -> list[dict]:
+    """Distribution of a series as [{level, n, pct}], honouring a fixed order.
+
+    With `sex` (a series the same length as `s`, matched by position), each
+    level also carries n_female and n_male, so a bar can be split by sex.
+    """
     if s is None:
         return []
     # Object first: a categorical (age_group is built with pd.cut) refuses a
@@ -1036,6 +1040,12 @@ def _dist(s, order=None, top=None, na="Not recorded") -> list[dict]:
     s = s.where(s.notna(), na).astype(str).replace({"nan": na, "None": na, "<NA>": na})
     vc = s.value_counts()
     n = int(vc.sum())
+    by_sex = None
+    if sex is not None and len(sex) == len(s):
+        sx = pd.Series(np.asarray(sex, dtype=object)).astype("string")
+        lv = pd.Series(s.to_numpy())
+        by_sex = {"Female": lv[sx.eq("Female").fillna(False).to_numpy()].value_counts(),
+                  "Male": lv[sx.eq("Male").fillna(False).to_numpy()].value_counts()}
     if order:
         items = [(lv, int(vc.get(lv, 0))) for lv in order]
         items = [it for it in items if it[1] > 0]   # don't render empty levels
@@ -1043,8 +1053,95 @@ def _dist(s, order=None, top=None, na="Not recorded") -> list[dict]:
         items = [(str(k), int(v)) for k, v in vc.items()]
         if top:
             items = items[:top]
-    return [{"level": k, "n": v, "pct": round(v / n * 100, 1) if n else 0.0}
-            for k, v in items]
+    out = []
+    for k, v in items:
+        row = {"level": k, "n": v, "pct": round(v / n * 100, 1) if n else 0.0}
+        if by_sex is not None:
+            row["n_female"] = int(by_sex["Female"].get(k, 0))
+            row["n_male"] = int(by_sex["Male"].get(k, 0))
+        out.append(row)
+    return out
+
+
+def cohort_flow(df: pd.DataFrame, start: str = "2025-07-01") -> dict:
+    """Clients entering and leaving the unsuppressed cohort, month by month.
+
+    Per CLIENT, not per result (Es, 22 Oct 2026): a client is in the cohort
+    from an unsuppressed result until that is resolved.
+
+      enters  - an unsuppressed result while the client is not in the cohort:
+                the first time ever ("new"), or after re-suppressing ("again")
+      stays   - a further result still >= 1,000: neither leaves nor re-enters
+      leaves  - re-suppressed: a follow-up below 1,000, dated when the result
+                reached the facility (the sample date where that is blank);
+                left care before a repeat VL: dated by the exit date
+
+    Episodes that left care with no exit date cannot be placed in time, so
+    they are left out of the flow and counted instead. `in_cohort` is the
+    number of clients in the cohort at each month's end, including those who
+    entered before the first month shown.
+    """
+    if df.empty or "sn" not in df:
+        return {"months": []}
+    recv = pd.to_datetime(_col(df, "recv_date"), errors="coerce")
+    fu_d = pd.to_datetime(_col(df, "fu_date"), errors="coerce")
+    fu_s = pd.to_datetime(_col(df, "fu_samp"), errors="coerce")
+    res_on = fu_d.where(fu_d.notna(), fu_s)
+    res_on = res_on.where(res_on.isna() | (res_on >= recv), recv)
+    resupp = df["resuppressed"].fillna(False).astype(bool) & res_on.notna()
+    left = left_care_untested(df)
+    exit_d = pd.to_datetime(_col(df, "exit_date"), errors="coerce")
+    exit_on = exit_d.where(exit_d.isna() | (exit_d >= recv), recv)   # never before entry
+    undated = left & exit_on.isna()
+    use = recv.notna() & ~undated
+
+    ev = []                                  # (date, order, sn, kind)
+    for i in df.index[use]:
+        sn = df.at[i, "sn"]
+        ev.append((recv[i], 0, sn, "unsupp"))
+        if resupp[i]:
+            ev.append((res_on[i], 1, sn, "supp"))
+        elif left[i]:
+            ev.append((exit_on[i], 1, sn, "left"))
+    ev.sort(key=lambda e: (e[0], e[1]))
+
+    t0 = pd.Timestamp(start)
+    last = max((e[0] for e in ev), default=t0)
+    months = pd.date_range(t0, last, freq="MS")
+    idx = {m: k for k, m in enumerate(months)}
+    z = lambda: [0] * len(months)
+    new, again, out_s, out_l, stock = z(), z(), z(), z(), z()
+
+    open_, seen, n_open = set(), set(), 0
+    before = 0                                   # clients in the cohort at the start
+    ptr = 0
+    for k, m_end in enumerate(list(months[1:]) + [months[-1] + pd.offsets.MonthBegin(1)] if len(months) else []):
+        while ptr < len(ev) and ev[ptr][0] < m_end:
+            d, _, sn, kind = ev[ptr]
+            ptr += 1
+            m = idx.get(d.to_period("M").start_time) if d >= t0 else None
+            if kind == "unsupp":
+                if sn in open_:
+                    continue                     # still unsuppressed: stays
+                open_.add(sn); n_open += 1
+                if m is not None:
+                    (again if sn in seen else new)[m] += 1
+                seen.add(sn)
+            elif sn in open_:
+                open_.discard(sn); n_open -= 1
+                if m is not None:
+                    (out_s if kind == "supp" else out_l)[m] += 1
+        if k == 0:
+            before = n_open - new[0] - again[0] + out_s[0] + out_l[0]
+        stock[k] = n_open
+    return {
+        "months": [m.strftime("%Y-%m-%d") for m in months],
+        "entered_new": new, "entered_again": again,
+        "left_resuppressed": out_s, "left_care": out_l,
+        "in_cohort": stock, "in_cohort_at_start": int(before),
+        "undated_left_care": int(undated.sum()),
+        "resuppression_dated_by_sample": int((resupp & fu_d.isna()).sum()),
+    }
 
 
 def _quart(s) -> dict | None:
@@ -1059,6 +1156,10 @@ def profile(df: pd.DataFrame) -> dict:
     n = len(df)
     if not n:
         return {"n": 0}
+    # Every distribution carries a female / male split, so each bar can be
+    # drawn stacked by sex in the same colours as every other chart.
+    sex_s = _col(df, "sex")
+    dist = lambda s_, *a_, **k_: _dist(s_, *a_, sex=sex_s, **k_)
     age = pd.to_numeric(_col(df, "age"), errors="coerce")
     yrs = pd.to_numeric(_col(df, "days_on_art"), errors="coerce") / 365
     cd4 = pd.to_numeric(_col(df, "first_cd4"), errors="coerce")
@@ -1130,55 +1231,56 @@ def profile(df: pd.DataFrame) -> dict:
             "female_pct": round(float((df["sex"] == "Female").mean() * 100), 1),
             "adolescent_pct": round(float(((age >= 10) & (age < 20)).mean() * 100), 1),
             "paed_pct": round(float((age < 10).mean() * 100), 1),
-            "sex": _dist(_col(df, "sex"), ["Female", "Male", "Unknown"], na="Unknown"),
-            "age_group": _dist(_col(df, "age_group"), ["Under 10", "10-19", "20+"]),
-            "age_band": _dist(_col(df, "age_band"),
+            "sex": dist(_col(df, "sex"), ["Female", "Male", "Unknown"], na="Unknown"),
+            "age_group": dist(_col(df, "age_group"), ["Under 10", "10-19", "20+"]),
+            "age_band": dist(_col(df, "age_band"),
                               ["0-9", "10-19", "20-24", "25-34", "35-49", "50+", "Unknown"],
                               na="Unknown"),
-            "marital": _dist(_col(df, "marital"),
+            "marital": dist(_col(df, "marital"),
                              ["Married", "Never married", "Previously married", "Other", "Not recorded"]),
-            "education": _dist(_col(df, "education"),
+            "education": dist(_col(df, "education"),
                                ["Primary", "Secondary", "Tertiary", "Other", "Not recorded"]),
-            "job": _dist(_col(df, "job"),
+            "job": dist(_col(df, "job"),
                          ["Employee", "Unemployed", "Student", "Other", "Not recorded"]),
             # female-only denominator (males are set to N/A upstream)
-            "pregnancy": _dist(df.loc[df["sex"] == "Female", "pregnancy"]
+            "pregnancy": dist(df.loc[df["sex"] == "Female", "pregnancy"]
                                if "pregnancy" in df else None,
                                ["Pregnant", "Breastfeeding", "Not pregnant", "Not recorded"]),
         },
         "what": {
             "median_years_art": round(float(yrs.median()), 1) if yrs.notna().any() else None,
-            "regimen": _dist(np.where(df["on_second_line"].fillna(False).astype(bool),
+            "regimen": dist(np.where(df["on_second_line"].fillna(False).astype(bool),
                                       "2nd/3rd line", "1st line"), ["1st line", "2nd/3rd line"]),
-            "vl_magnitude": _dist(_col(df, "vl_magnitude"), ["1k-10k", "10k-100k", ">=100k"]),
-            "cd4": _dist(_col(df, "cd4_band"), ["<200", ">=200", "Not recorded"]),
-            "years_art": _dist(yrs.map(lambda v: _band(v, [1, 3, 5, 10], yr_lab)),
+            "vl_magnitude": dist(_col(df, "vl_magnitude"), ["1k-10k", "10k-100k", ">=100k"]),
+            "cd4": dist(_col(df, "cd4_band"), ["<200", ">=200", "Not recorded"]),
+            "years_art": dist(yrs.map(lambda v: _band(v, [1, 3, 5, 10], yr_lab)),
                                yr_lab + ["Not recorded"]),
-            "eac_status": _dist(pd.Series(eac_status, index=df.index),
+            "eac_status": dist(pd.Series(eac_status, index=df.index),
                                 ["Never commenced", "Commenced, not completed", "Completed EAC",
                                  "Left care before a repeat VL"]),
-            "who_stage": _dist(_col(df, "who_stage"),
+            "who_stage": dist(_col(df, "who_stage"),
                                ["Stage 1", "Stage 2", "Stage 3", "Stage 4", "Not recorded"]),
-            "bmi": _dist(pd.to_numeric(_col(df, "bmi"), errors="coerce")
+            "bmi": dist(pd.to_numeric(_col(df, "bmi"), errors="coerce")
                          .map(lambda v: _band(v, [18.5, 25, 30],
                               ["Underweight (<18.5)", "Normal (18.5-24.9)",
                                "Overweight (25-29.9)", "Obese (30+)"])),
                          ["Underweight (<18.5)", "Normal (18.5-24.9)",
                           "Overweight (25-29.9)", "Obese (30+)", "Not recorded"]),
-            "plan": _dist(_col(df, "treatment_plan")),
+            "plan": dist(_col(df, "treatment_plan")),
         },
         "when": {
             "monthly": monthly,
+            "flow": cohort_flow(df),
             "wait": wait,
-            "quarter": _dist(_col(df, "enrol_quarter"), qs),
+            "quarter": dist(_col(df, "enrol_quarter"), qs),
             # ART start -> first-ever VL (the 6-month guideline clock) and
             # ART start -> first UNSUPPRESSED VL (how long treatment held).
-            "time_to_first_vl": _dist(
+            "time_to_first_vl": dist(
                 pd.to_numeric(_col(df, "time_to_first_vl"), errors="coerce")
                 .map(lambda v: _band(v / 30.44, [6, 12, 24],
                      ["<6 mo", "6-12 mo", "1-2 yr", "2+ yr"])),
                 ["<6 mo", "6-12 mo", "1-2 yr", "2+ yr", "Not recorded"]),
-            "yrs_to_unsupp": _dist(
+            "yrs_to_unsupp": dist(
                 pd.to_numeric(_col(df, "time_to_first_unsupp"), errors="coerce")
                 .map(lambda v: _band(v / 365.25, [1, 3, 5, 10],
                      ["<1 yr", "1-3 yr", "3-5 yr", "5-10 yr", "10+ yr"])),
@@ -1187,10 +1289,10 @@ def profile(df: pd.DataFrame) -> dict:
                                    errors="coerce") / 30.44),
             "ttfu_years": _quart(pd.to_numeric(_col(df, "time_to_first_unsupp"),
                                   errors="coerce") / 365.25),
-            "time_to_eac": _dist(tte.map(lambda v: _band(v, [31, 91], ["<=30 d", "31-90 d", ">90 d"],
+            "time_to_eac": dist(tte.map(lambda v: _band(v, [31, 91], ["<=30 d", "31-90 d", ">90 d"],
                                                          na="No EAC on record")),
                                  ["<=30 d", "31-90 d", ">90 d", "No EAC on record"]),
-            "months_unsupp": _dist(mu.map(lambda v: _band(v, [3, 6, 12], mu_lab)),
+            "months_unsupp": dist(mu.map(lambda v: _band(v, [3, 6, 12], mu_lab)),
                                    mu_lab + ["Not recorded"]),
             "tte_stats": _quart(tte),
             "lead_stats": _quart(_col(df, "eac_lead_time")),
@@ -1198,9 +1300,9 @@ def profile(df: pd.DataFrame) -> dict:
         },
         "care": _care_outcomes(df),
         "where": {
-            "state": _dist(_col(df, "state"), na="Unknown"),
-            "lga": _dist(_col(df, "lga"), top=10, na="Unknown"),
-            "facility": _dist(_col(df, "facility"), top=10, na="Unknown"),
+            "state": dist(_col(df, "state"), na="Unknown"),
+            "lga": dist(_col(df, "lga"), top=10, na="Unknown"),
+            "facility": dist(_col(df, "facility"), top=10, na="Unknown"),
             "lga_res": _lga_res_map(df),
         },
     }
@@ -1378,13 +1480,13 @@ def _care_outcomes(df) -> dict:
                      "no_followup_vl": int((m & no_fu).sum()),
                      "no_post_eac_vl": int((m & no_peac).sum())})
     return {
-        "status": _dist(st, ["Active"] + _NEG_OUTCOMES + ["Not recorded"]),
+        "status": _dist(st, ["Active"] + _NEG_OUTCOMES + ["Not recorded"], sex=_col(df, "sex")),
         "neg_total": int(neg.sum()),
         "neg_pct": round(float(neg.mean()) * 100, 1) if n else None,
         "neg_no_followup": int((neg & no_fu).sum()),
         "neg_no_post_eac": int((neg & no_peac).sum()),
         "neg_dated": int(dated.sum()),
-        "exit_when": _dist(when[neg], _EXIT_WHEN),
+        "exit_when": _dist(when[neg], _EXIT_WHEN, sex=_col(df, "sex")[neg]),
         "breakdown": rows,
     }
 
