@@ -50,7 +50,7 @@ export function KpiTile({
   icon: Icon, label, value, definition, sparkline, sparkLabel,
   trend, better = 'up', since, note, status, className, children, hue,
 }: {
-  /** Which tile tint (1-7, defined in styles/vibrant.css) colours the icon chip
+  /** Which tile tint (1-7, defined in styles/merged-theme.css) colours the icon chip
    *  and sparkline. Identity only - never status, which keeps its own colours. */
   hue?: 1 | 2 | 3 | 4 | 5 | 6 | 7
   icon: typeof Info

@@ -16,7 +16,7 @@ import DtcPage from '@/pages/dtc-page'
 import { AWAITING, DTC, TRAJ } from './dtc-fixture'
 import '@/styles/fonts.css'
 import '@/index.css'
-import '@/styles/vibrant.css'
+import '@/styles/merged-theme.css'
 
 try {
   sessionStorage.setItem('ecews.session', 'harness')

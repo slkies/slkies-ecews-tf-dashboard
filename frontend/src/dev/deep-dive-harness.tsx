@@ -16,7 +16,7 @@ import DeepDivePage, { type Dist, type FacilityRow, type Profile } from '@/pages
 import { WORKLISTS } from '@/pages/worklists-page'
 import '@/styles/fonts.css'
 import '@/index.css'
-import '@/styles/vibrant.css'
+import '@/styles/merged-theme.css'
 
 try {
   sessionStorage.setItem('ecews.session', 'harness')

@@ -10,8 +10,8 @@ import './styles/fonts.css'
 // single-file dashboard are gone: their global table, input and card rules
 // would restyle shadcn's components underneath them.
 import './index.css'
-// Brighter brand green and tile tints. Delete this line to revert the look.
-import './styles/vibrant.css'
+// Merged theme (Octet interface, LearnUI data colours). Delete this line to revert.
+import './styles/merged-theme.css'
 
 const root = document.getElementById('root')
 if (!root) throw new Error('#root is missing from index.html')

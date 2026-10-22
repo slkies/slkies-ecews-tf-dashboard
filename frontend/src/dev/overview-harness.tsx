@@ -21,7 +21,7 @@ import type { Trend } from '@/core/use-trend'
 import OverviewPage from '@/pages/overview-page'
 import '@/styles/fonts.css'
 import '@/index.css'
-import '@/styles/vibrant.css'
+import '@/styles/merged-theme.css'
 
 if (new URLSearchParams(location.search).get('theme') === 'dark') {
   try { localStorage.setItem('ecews.theme', 'dark') } catch { /* ignore */ }

@@ -1,13 +1,15 @@
 /**
  * Chart colours, per theme.
  *
- * Series identity uses a blue/orange pair that passes colour-vision checks on
- * both themes (validated against the card and page surfaces: adjacent
- * delta-E 24.7 light, 26.8 dark). The original app's female/male pair failed
- * those checks in both themes - too dark and grey on light, and two blues too
- * close to separate on dark - so it is not carried forward.
+ * Series identity uses a teal-blue/coral pair from the merged theme
+ * (styles/merged-theme.css): the cool and warm ends of a LearnUI-style ramp
+ * from the brand teal to amber, snapped in lightness and chroma until it passed
+ * the colour-vision validator against the card - CVD delta-E 18.3 light, 19.0
+ * dark, normal-vision 30.3 / 28.9, and 3:1 against the surface. The ramp's own
+ * endpoints failed: the teal reads grey in a chart and the amber is too pale on
+ * white (22 Oct 2026).
  *
- * Brand green is the accent, not a series colour: it marks the one thing a
+ * The brand colour is the accent, not a series colour: it marks the one thing a
  * chart is about (a single-series trend, a sparkline), never "series 3".
  * Status colours (good / warn / bad) are reserved for status and live in the
  * CSS tokens, never here.
@@ -23,19 +25,19 @@ export interface ChartPalette {
 }
 
 export const PALETTE_LIGHT: ChartPalette = {
-  primary: '#08684E',
-  female: '#2a78d6',
-  male: '#eb6834',
-  unknown: '#d6d5cc',
-  provisional: '#8a897b',
+  primary: '#055B65',   // Octet deep teal
+  female: '#0073a1',    // merged ramp, cool end - validated: CVD dE 18.3, normal 30.3, >= 3:1
+  male: '#de6129',      // merged ramp, warm end
+  unknown: '#d5dbdf',
+  provisional: '#8794a0',
 }
 
 export const PALETTE_DARK: ChartPalette = {
-  primary: '#2BD39C',
-  female: '#3987e5',
-  male: '#d95926',
-  unknown: '#44443c',
-  provisional: '#8f8e82',
+  primary: '#1BD488',   // Octet vivid green
+  female: '#008cc0',    // validated on the dark card: CVD dE 19.0, normal 28.9
+  male: '#e06b39',
+  unknown: '#3a4145',
+  provisional: '#8f9aa3',
 }
 
 /** The palette for the current theme. Its identity changes with the theme,
