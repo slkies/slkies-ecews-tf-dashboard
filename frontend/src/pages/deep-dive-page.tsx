@@ -368,9 +368,10 @@ export default function DeepDivePage({ onOpenWorklist }: { onOpenWorklist?: (fla
                description="Composition of the cohort. Where a field is blank in the export it is shown as Not recorded rather than quietly dropped: the gap is itself a finding.">
         <div className={GRID}>
           <DistCard title="Sex" dist={who.sex} colors={{ Female: C.female, Male: C.male }} />
-          <DistCard title="Age group" dist={who.age_group} note={`${under20.toFixed(1)}% are under 20`}
-                    highlight={{ 'Under 10': 'bad', '10-19': 'warn' }} />
-          <DistCard title="Age band" dist={who.age_band} />
+          {/* Age band only: the coarser age group repeated it. Its priority
+              markings and the under-20 share moved here. */}
+          <DistCard title="Age band" dist={who.age_band} note={`${under20.toFixed(1)}% are under 20`}
+                    highlight={{ '0-9': 'bad', '10-19': 'warn' }} />
           <DistCard title="Marital status" dist={who.marital} />
           <DistCard title="Education" dist={who.education} />
           <DistCard title="Employment" dist={who.job} />

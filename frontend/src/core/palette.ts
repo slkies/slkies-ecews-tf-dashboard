@@ -26,7 +26,8 @@ export interface ChartPalette {
   series1: string
   series2: string
   /** The cohort flow, in the Octet palette (Es, 23 Oct 2026): Enamelled Jewel
-   *  for entering, Retro Lime for leaving, the other swatches for the rest. */
+   *  for entering and a light Enamelled Jewel for leaving (it replaced Retro
+   *  Lime, too pale on white), the other swatches for the rest. */
   flowIn: string; flowAgain: string; flowOut: string; flowCare: string
   stock: string; stockFill: string
   unknown: string      // data gap, deliberately recessive
@@ -41,7 +42,7 @@ export const PALETTE_LIGHT: ChartPalette = {
   series2: '#5e5bb6',
   flowIn: '#055b65',       // Enamelled Jewel - entered
   flowAgain: '#45828b',    // Wish Upon a Star - entered again
-  flowOut: '#1bd488',      // Retro Lime - left, re-suppressed
+  flowOut: '#3c94a1',      // light Enamelled Jewel - left, re-suppressed (dE 20.8 vs Light Teal)
   flowCare: '#b2c9c5',     // Light Teal - left care before a repeat VL
   stock: '#055b65',
   stockFill: '#b2c9c5',
@@ -57,7 +58,7 @@ export const PALETTE_DARK: ChartPalette = {
   series2: '#8081d8',
   flowIn: '#3f9aa5',       // the jewel, lifted to read on the dark card
   flowAgain: '#b2c9c5',
-  flowOut: '#1bd488',
+  flowOut: '#8dd2d6',      // light jewel on the dark card (dE 18.4 vs entering)
   flowCare: '#5f7a7d',
   stock: '#b2c9c5',
   stockFill: '#45828b',
