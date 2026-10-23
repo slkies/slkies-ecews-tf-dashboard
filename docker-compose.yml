@@ -13,7 +13,10 @@ services:
 
   api:
     build:
-      context: ./backend
+      # The repo root, not ./backend: the Dockerfile builds the React app from
+      # frontend/ in a first stage, and that is outside backend/.
+      context: .
+      dockerfile: backend/Dockerfile
       # Stamped by scripts/deploy.ps1. Unset (a bare `docker compose up
       # --build`) leaves the commit "unknown" - the version and the index hash
       # still work, so this degrades rather than breaks.
@@ -27,7 +30,9 @@ services:
       # so a hosted deployment cannot silently run on a known signing key.
       APP_ENV: ${APP_ENV:-development}
       JWT_SECRET: ${JWT_SECRET:-}
-      ADMIN_PASSWORD: ${ADMIN_PASSWORD:-changeme}
+      # No default: unset means no seeded admin, never a guessable one.
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:-}
+      VIEWER_PASSWORD: ${VIEWER_PASSWORD:-}
     ports: ["8080:8000"]
     depends_on:
       db: {condition: service_healthy}

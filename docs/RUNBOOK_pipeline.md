@@ -30,7 +30,7 @@ data never sits in that folder at all.
 | File | What it is |
 |---|---|
 | `SN_Key.xlsx` | the vault — 180,153 identities |
-| `ECEWS_Treatment_Linelist_8th August 2026.xlsx` | raw weekly export, **password-protected**, 180,528 rows × 132 cols |
+| `treatment\*.xlsx` | the raw weekly exports, **password-protected**, about 180,000 rows × 130 cols each |
 | `TF_Dashboard_Dataset.xlsx` | the original workbook the EAC sheets came out of |
 | `eac\*.xlsx` | the five EAC lists, one file each |
 | `Total_Unsuppressed.xlsx` | the cumulative register |
@@ -236,8 +236,9 @@ Running it twice would issue everyone *another* new key and orphan everything
 published under the first. The script refuses if it detects the migration has
 already happened — but do not rely on that; just leave the flag off.
 
-1. Drop the new raw treatment export into the folder. The script takes the most
-   recently modified file matching `*Treatment*`.
+1. Drop the new raw treatment export into `treatment\`. The script takes the most
+   recently modified file matching `*Treatment*` there, and says so if one has
+   been left in the main folder by mistake.
 2. When a new EAC list arrives (fortnightly), add it to `eac\` — **add**, do not
    replace.
 3. Rehearse, then run. **The simplest way is to double-click, in `backend\scripts\`:**

@@ -3,6 +3,7 @@ Spec §9 requires unit tests for the decision tree, the temporal matching logic
 and the negative-value exclusion. Plus the guard that matters most in practice:
 detecting a success-censored EAC export.
 """
+import numpy as np
 import pandas as pd
 import pytest
 
@@ -83,7 +84,7 @@ def test_eac_before_index_vl_is_a_prior_cycle_and_excluded():
     c = cohort([mk(Session_1_Date="2026-01-10")])   # before the 1 Mar index VL
     assert bool(c.df.loc[0, "eac1"]) is False
     assert bool(c.df.loc[0, "eac_prior_cycle"]) is True
-    assert cascade(c.df)[1]["n"] == 0               # step 2 = EAC commenced
+    assert next(s for s in cascade(c.df) if s["step"] == 2)["n"] == 0   # EAC commenced
 
 
 # ── §5: negative time-to-EAC is a data error, never a value ───────────
@@ -524,3 +525,136 @@ def test_eac_before_index_counts_as_not_yet_commenced():
     assert len(c.df) == 1, "prior-cycle episode was dropped from the cohort"
     assert bool(c.df.loc[0, "eac1"]) is False
     assert bool(c.df.loc[0, "eac_prior_cycle"]) is True
+
+
+# ── column names that drift between exports ───────────────────────────
+def test_columns_resolve_whatever_style_the_export_uses():
+    """The 12 Sep 2026 export moved to underscores and capitals. A lower-case
+    match missed these, and age, exit dates and residence went blank."""
+    from app.indicators import _pick, col_key
+    df = pd.DataFrame(columns=["Outcomes_Date", "Current_Age", "LGA_of_Residence",
+                               "DSD_Model", "Pharmacy_LastPickupdate"])
+    assert _pick(df, "outcomesDate") == "Outcomes_Date"
+    assert _pick(df, "currentAge") == "Current_Age"
+    assert _pick(df, "lgaOfResidence") == "LGA_of_Residence"
+    assert _pick(df, "dsdModel") == "DSD_Model"
+    assert col_key("Pharmacy_LastPickupdate") == col_key("pharmacyLastPickupdate")
+
+
+def test_audit_reports_an_underscored_rename_as_drift_not_missing():
+    from app.ingest import EXPECTED_COLS, _col_audit
+    cols = {c: [] for c in EXPECTED_COLS["treatment"]}
+    cols["Outcomes_Date"] = cols.pop("outcomesDate")
+    found = []
+    _col_audit(pd.DataFrame(cols), "treatment", "t",
+               lambda sheet, check, sev, n, text: found.append((check, n, text)))
+    assert next(f for f in found if f[0] == "Expected column missing")[1] == 0
+    drift = [f for f in found if f[0] == "Header casing drift (tolerated)"]
+    assert drift and "Outcomes_Date should be outcomesDate" in drift[0][2]
+
+
+# ── clients who left care before a repeat VL are not a gap ─────────────
+def test_left_care_untested_is_a_negative_outcome_with_no_repeat_vl():
+    from app.indicators import left_care_untested
+    gone = cohort([mk()], status="LTFU")                                  # never retested
+    back = cohort([mk()], status="LTFU", fu_vl=400, fu_samp="2026-06-01")  # retested, then left
+    here = cohort([mk()], status="Active")                                # still in care
+    assert bool(left_care_untested(gone.df).iloc[0]) is True
+    assert bool(left_care_untested(back.df).iloc[0]) is False
+    assert bool(left_care_untested(here.df).iloc[0]) is False
+
+
+def test_cascade_shows_left_care_as_its_own_step_and_measures_gaps_without_it():
+    c = cohort([mk()], status="Death")                 # no EAC, never retested
+    steps = {s["step"]: s for s in cascade(c.df)}
+    assert steps[1]["n"] == 1                          # still in the cohort
+    assert steps[11]["n"] == 1                         # shown, and named
+    assert steps[12]["n"] == 0                         # not in the base
+    assert steps[2]["n"] == 0 and steps[2]["denominator"] == 0,         "a client who left care must not read as 'never commenced EAC'"
+
+
+def test_deep_dive_eac_status_names_left_care_rather_than_never_commenced():
+    from app.indicators import profile
+    p = profile(cohort([mk()], status="Transferred out").df)
+    levels = {d["level"]: d["n"] for d in p["what"]["eac_status"]}
+    assert levels.get("Left care before a repeat VL") == 1
+    assert levels.get("Never commenced", 0) == 0
+
+
+# ── the cohort flow: clients entering and leaving, per client ──────────
+def test_cohort_flow_enters_on_unsuppressed_and_leaves_only_when_resolved():
+    from app.indicators import cohort_flow
+    df = pd.DataFrame([
+        # A: enters Aug, re-suppressed Oct (result date blank -> sample date)
+        {"sn": "A", "recv_date": "2025-08-10", "fu_date": None, "fu_samp": "2025-10-05",
+         "resuppressed": True, "post_result": True, "art_status": "Active", "exit_date": None},
+        # A again: unsuppressed in Dec after re-suppressing -> enters again
+        {"sn": "A", "recv_date": "2025-12-03", "fu_date": None, "fu_samp": None,
+         "resuppressed": False, "post_result": False, "art_status": "Active", "exit_date": None},
+        # B: enters Aug; a repeat result still >= 1,000 in Sep keeps B in
+        {"sn": "B", "recv_date": "2025-08-20", "fu_date": None, "fu_samp": "2025-09-15",
+         "resuppressed": False, "post_result": True, "art_status": "Active", "exit_date": None},
+        {"sn": "B", "recv_date": "2025-09-25", "fu_date": None, "fu_samp": None,
+         "resuppressed": False, "post_result": False, "art_status": "Active", "exit_date": None},
+        # C: enters Sep, leaves care in Nov before any repeat VL
+        {"sn": "C", "recv_date": "2025-09-02", "fu_date": None, "fu_samp": None,
+         "resuppressed": False, "post_result": False, "art_status": "LTFU", "exit_date": "2025-11-20"},
+    ])
+    f = cohort_flow(df, start="2025-08-01")
+    m = {mo[:7]: i for i, mo in enumerate(f["months"])}
+    assert f["entered_new"][m["2025-08"]] == 2 and f["entered_new"][m["2025-09"]] == 1
+    assert sum(f["entered_new"]) == 3, "B's repeat >=1,000 result is not a new entry"
+    assert f["entered_again"][m["2025-12"]] == 1
+    assert f["left_resuppressed"][m["2025-10"]] == 1
+    assert f["left_care"][m["2025-11"]] == 1
+    assert f["in_cohort"][m["2025-09"]] == 3            # A, B, C
+    assert f["in_cohort"][m["2025-11"]] == 1            # A re-suppressed, C left: B remains
+    assert f["in_cohort"][m["2025-12"]] == 2            # A is back
+    assert f["resuppression_dated_by_sample"] == 1
+
+
+def test_profile_distributions_carry_a_sex_split():
+    from app.indicators import profile
+    p = profile(cohort([mk()], status="Active").df)
+    row = p["who"]["age_band"][0]
+    assert {"n_female", "n_male"} <= set(row) and row["n_female"] + row["n_male"] <= row["n"]
+
+
+# ── survival: dated events, censored at the line-list date ─────────────
+def test_kaplan_meier_dates_events_by_sample_when_result_date_is_blank_and_censors_at_as_of():
+    from app.indicators import kaplan_meier
+    df = pd.DataFrame([
+        # re-suppressed: result date blank, sample 100 days after session 1
+        {"s1_date": "2026-01-01", "fu_date": None, "fu_samp": "2026-04-11", "resuppressed": True, "eac1": True},
+        # not re-suppressed: censored at the line-list date, 200 days after session 1
+        {"s1_date": "2026-01-01", "fu_date": None, "fu_samp": None, "resuppressed": False, "eac1": True},
+    ])
+    km = kaplan_meier(df, as_of="2026-07-20")
+    events = [p for p in km if p["t"] > 0]
+    assert events and events[0]["t"] == 100 and events[0]["survival"] == 0.5
+    # nothing placed at "today": the censored episode ends at the as-of date
+    assert all(p["t"] <= 200 for p in km)
+
+
+def test_the_risk_list_leaves_out_clients_who_left_care_before_a_retest():
+    from app.indicators import resuppression_model
+    rng = np.random.default_rng(7)
+    n_train, n_pend = 160, 20
+    n = n_train + n_pend
+    df = pd.DataFrame({
+        "sn": [f"0.{i:012d}" for i in range(n)],
+        "sex": rng.choice(["Female", "Male"], n),
+        "idx_vl": rng.integers(1_000, 500_000, n).astype(float),
+        "eac1": rng.random(n) > 0.2, "eac3": rng.random(n) > 0.5,
+        "post_result": [True] * n_train + [False] * n_pend,
+        "resuppressed": list(rng.random(n_train) > 0.3) + [False] * n_pend,
+        # half the pending clients died or transferred out before a retest
+        "art_status": ["Active"] * (n_train + n_pend // 2) + ["Died", "Transferred out"] * (n_pend // 4),
+        "facility": "F", "state": "Delta", "age": 30.0, "sessions": 1, "paed": False,
+        "treatment_plan": "B. Complete EAC, update register and EMR",
+    })
+    r = resuppression_model(df)
+    assert r["ok"]
+    assert r["n_scored"] == n_pend // 2 and r["n_left_care"] == n_pend // 2
+    kept = set(df["sn"][n_train:n_train + n_pend // 2])
+    assert {x["sn"] for x in r["lowest_chance"]} == kept

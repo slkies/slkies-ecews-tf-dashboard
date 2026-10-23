@@ -200,7 +200,7 @@ Claims in §2 were checked against the running application at commit `f5e33fc`:
   with the 24-July snapshot returns 3,489 — the full client count. No client
   was assigned a new key across the refresh.
 - **Key format.** Values are random decimals in `[0,1)` carried as text, e.g.
-  `0.00024886211364749666`. Twelve or more decimal places are required for
+  `0.123456789012345678` (illustrative). Twelve or more decimal places are required for
   uniqueness; at eight places approximately 164 clients collide.
 - **Key exposure.** `S/N` is included in the client worklist and CSV export
   columns, which is what currently makes the worklists actionable (§3).

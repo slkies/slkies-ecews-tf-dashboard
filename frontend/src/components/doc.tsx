@@ -1,0 +1,77 @@
+/**
+ * Reading pages (Guidelines, Methodology): headings that step down, and a
+ * callout for the sentence that matters. Content fills the card, like every
+ * other page (Es, 23 Oct 2026: a 70-character measure left most of each card
+ * empty). No inline bold in the running text; the callout carries emphasis.
+ */
+import type { ReactNode } from 'react'
+import { cn } from 'cn'
+import { Card, CardContent } from '@/components/ui/card'
+import {
+  Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
+} from '@/components/ui/table'
+
+/**
+ * Sections side by side from 1,280px. A full-width paragraph on a wide monitor
+ * runs to about 200 characters a line, and past about 90 the eye loses its
+ * place returning to the next line, so readers re-read or skip lines. Two
+ * columns keep each line near 65 to 90 characters without wasting the width.
+ * Whole sections sit side by side rather than one section's text flowing
+ * across columns, which would make a reader jump mid-thought. Below 1,280px a
+ * column would be under 450px, so the page stays single-column.
+ */
+export function DocGrid({ children }: { children: ReactNode }) {
+  return <div className="grid gap-6 xl:grid-cols-2">{children}</div>
+}
+
+/** `wide` spans both columns: for a section that is mostly a table. */
+export function Doc({ eyebrow, title, children, wide = false }: {
+  eyebrow?: string; title: string; children: ReactNode; wide?: boolean
+}) {
+  return (
+    <Card className={cn('min-w-0', wide && 'xl:col-span-2')}>
+      <CardContent className="flex flex-col gap-4 text-sm leading-relaxed text-foreground/90 2xl:text-[15px]">
+        {eyebrow && <span className="text-[11px] font-medium tracking-[0.08em] text-muted-foreground uppercase">{eyebrow}</span>}
+        <h2 className="text-xl font-semibold tracking-tight text-foreground text-balance">{title}</h2>
+        {children}
+      </CardContent>
+    </Card>
+  )
+}
+
+export function H3({ children }: { children: ReactNode }) {
+  return <h3 className="pt-2 text-base font-semibold text-foreground">{children}</h3>
+}
+
+export function Callout({ children, tone = 'brand' }: { children: ReactNode; tone?: 'brand' | 'bad' }) {
+  return (
+    <p className={cn('rounded-r-lg border-l-4 px-4 py-3 text-foreground',
+                     tone === 'bad' ? 'border-bad bg-bad-tint' : 'border-[var(--icon)] bg-[color-mix(in_oklch,var(--icon)_10%,transparent)]')}>
+      {children}
+    </p>
+  )
+}
+
+/** A plain two- or three-column reference table. */
+export function RefTable({ head, rows, right = [] }: { head: string[]; rows: ReactNode[][]; right?: number[] }) {
+  return (
+    <div className="overflow-x-auto rounded-lg border">
+      <Table className="text-xs">
+        <TableHeader className="bg-muted/50">
+          <TableRow className="hover:bg-transparent">
+            {head.map((h, i) => <TableHead key={h} className={cn(right.includes(i) && 'text-right')}>{h}</TableHead>)}
+          </TableRow>
+        </TableHeader>
+        <TableBody>
+          {rows.map((r, i) => (
+            <TableRow key={i}>
+              {r.map((c, j) => (
+                <TableCell key={j} className={cn('whitespace-normal', j === 0 && 'font-medium', right.includes(j) && 'text-right tabular-nums')}>{c}</TableCell>
+              ))}
+            </TableRow>
+          ))}
+        </TableBody>
+      </Table>
+    </div>
+  )
+}

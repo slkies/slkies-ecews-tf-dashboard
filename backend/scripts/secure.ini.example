@@ -18,7 +18,7 @@ backups  = C:\ECEWS_Secure\vault\backups
 # Raw exports, with PII. Treatment list weekly, EAC list fortnightly.
 # A pattern: the export is named with its date, so the newest match wins.
 # A fixed name goes stale silently - the run succeeds on last week's file.
-treatment = C:\ECEWS_Secure\incoming\*Treatment*.xls*
+treatment = C:\ECEWS_Secure\treatment\*Treatment*.xls*
 # A glob: the EAC list is NOT cumulative - clients drop out as cycles close -
 # so the dashboard unions every sheet and the pipeline must carry them all.
 eac       = C:\ECEWS_Secure\incoming\eac\*.xlsx

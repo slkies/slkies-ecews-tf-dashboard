@@ -1,348 +1,223 @@
 # ECEWS TF Monitor — Project Status & Handoff
 
-**Last updated:** 9 Sep 2026
+**Last updated:** 23 Oct 2026
 **Owner:** Es (Data Analytics Lead, ECEWS / SPEED Program — PEPFAR/CDC, Nigeria)
 **Purpose:** Online, multi-user web app for HIV ART **treatment-failure (TF)** and
-**EAC** monitoring across Delta, Osun, Ekiti. Admin uploads bi-weekly line lists;
-everyone else reads.
+**EAC** monitoring across Delta, Osun, Ekiti. An admin loads the de-identified line
+list; everyone else reads.
 
-This document is the single source of truth for picking the project up in Claude
-Code or Cowork **without re-deriving anything**. The companion clinical/analytical
-spec is `EAC_Indicator_Definitions_and_Data_Analysis_Plan_v3_1.md`.
+This document says where the project stands. **Why things are the way they are** —
+the decisions that still bind and every incident that shaped them — is
+`docs/DECISIONS_AND_INCIDENTS.md`; read its **Standing rules** before changing the
+key, the export filter, or anything that prints. The clinical and analytical spec
+is `EAC_Indicator_Definitions_and_Data_Analysis_Plan_v3_1.md`. The weekly pipeline
+is `docs/RUNBOOK_pipeline.md`.
 
-**Why things are the way they are** — the decisions that still bind and every
-incident that shaped them — is `docs/DECISIONS_AND_INCIDENTS.md`. Read its
-**Standing rules** before changing the key, the export filter, or anything that
-prints. This file says where the project stands; that one says why.
-
----
-
-## 1. How to run (local dev)
-
-```bash
-# from the repo root (folder containing docker-compose.yml)
-docker compose up --build          # app on http://localhost:8080 (compose maps 8080->8000)
-# schema changed? wipe the DB volume first:
-docker compose down -v && docker compose up --build
-```
-
-Upload path in the UI: **Admin → upload the Parquet zip**, set **line-list date =
-2026-07-11**, cohort mode is **snapshot** (the only mode now).
-
-**Backend tests (fast, no Docker):**
-```bash
-cd backend
-export PYTHONPATH=$PWD DATABASE_URL="postgresql://ecews:ecews@localhost:5432/ecews"
-export ADMIN_PASSWORD=test1234 JWT_SECRET=test
-service postgresql start
-python3 -m pytest tests/ -q          # 43 tests, all passing
-```
-
-**ECEWS workbook password:** `1572`.
-**Convert Excel → Parquet zip** (95 MB → 16 MB, ~96× faster ingest):
-```bash
-docker run --rm -v ${PWD}:/work ecews_tf_monitor-api \
-  python /work/backend/scripts/to_parquet.py "/work/<file>.xlsx"
-```
+No password, key or identifier belongs in this file or anywhere in the repo. The
+repo is public. Credentials live in `.env` (gitignored) or the host's secret store.
 
 ---
 
-## 2. What the app does (pages)
+## 1. Where things run
 
-| Page | State | Notes |
-|---|---|---|
-| **Overview** | ✅ Built & polished | Headline tiles + **time-to-event strip**, narrative + cohort card, EAC & outcome donuts (M/F, commenced) + per-state bars, monthly re-suppression trend (F/M, provisional last month) + quarterly cascade table, facility league, zero-EAC, **Methodology & data sources** panel |
-| **Cascade** | ✅ Built & polished | Blue-ramp bars with F/M stack, step 61 Post-EAC VL, "cohort lost" chart, outcome doughnut; click a step → worklist. Slices by filters |
-| **Deep dive** | ✅ Rebuilt as **descriptive infographic** | Who/What/When/Where — donuts + bars + monthly trend + **residence LGA choropleth** (geoBoundaries, greyed context states); flags + facility league footer |
-| Time metrics | ✅ Redesigned | **Box-and-whisker** per indicator (own scale, guideline target lines), re-suppression KM, **era-split cumulative-incidence** curve of time-to-first-unsuppression. Time-to-switch = **not computable** |
-| Treatment plans | ✅ | §6 decision engine, one plan per episode |
-| **DTC review** | ✅ Built | Switch gap (awaiting vs switched, by state/regimen/months/CD4), repeat-unsuppression univariate ORs, intervention worklist. No switch date → shows *who*, not *why*. **New (19 Aug 2026):** *post-EAC sample collected, result not yet returned* — the laboratory queue, 273 outstanding, median 15 days, 30 beyond 60; and *viral load trajectory* — every episode still ≥1,000 on the follow-up VL whether or not EAC completed (398 clients, 2–4 dated results each), classified as rebound after suppression / persistently high / erratic / sharp rise |
-| **Advanced analytics** | ✅ | **AOR forest plot + univariate/adjusted table** (hand-rolled logistic, χ²/trend/Mann–Whitney), **binary CD4** rate card (integer + VISITEC LFA merged), risk-scoring model (AUC 0.716) + calibration, mortality |
-| Data quality | ✅ | ~22 checks per upload |
-| Guidelines | ✅ | 2024 National Guidelines narrative + mapping to dashboard measures |
-| Methodology | ✅ | Cohort definition + known gaps |
-| Admin | ✅ | Upload (snapshot only), immutable snapshots; DQ/ingest banners; **Users & access** (create/disable users, roles). Admin-only tab |
+| | Branch | Served at | Status |
+|---|---|---|---|
+| Live dashboard | `main` | `/` | The original single-file app. **IT deploys from `main`.** |
+| React rebuild | `react` | `/app` | Every page rebuilt (23 Oct 2026). **Merge into `main` only when Es approves.** |
 
-**Auth:** roles admin / analyst / viewer. Non-admins see every page except Admin. Seeded:
-`admin@ecews.org` (`ADMIN_PASSWORD`) and `viewer@ecews.org` (`VIEWER_PASSWORD`, default
-`viewer1234`) for testing. Admin creates more via the Users panel. **Feedback** is a floating
-FAB (bottom-right) → `feedback` table; admins list it via `/api/feedback`.
+Both are served by the same FastAPI backend and database, so they always show the
+same figures.
 
-Filters propagate everywhere: **FY (FY25/FY26)**, enrolment quarter, state, LGA,
-facility, sex, age band, treatment plan. **LGA/facility dropdowns cascade off the
-selected state; "Unknown" is hidden from state & age-band pickers** (still counts under
-All). Row-level scoping is enforced (a Delta viewer cannot read Osun; asserted in e2e).
+## 2. How to run (local)
 
----
+```bash
+# from the repo root; copy .env.example to .env and set every value first
+docker compose up -d --build        # http://localhost:8080 (compose maps 8080 -> 8000)
+```
 
-## 3. Locked analytical rules (do not silently change)
+- **Deploy locally:** `backend/scripts/deploy.ps1` rebuilds the image and reports the
+  commit being served. Static files are baked into the image, so a restart alone
+  does not pick up a change.
+- **Seeded accounts:** the admin (and optional shared viewer) are created on first
+  start only if `ADMIN_PASSWORD` / `VIEWER_PASSWORD` are set. There are no default
+  passwords in the code: unset means the account is not created. Later changes go
+  through Admin → Users and access.
+- **Backend tests** run inside Docker (the image pins pandas 2.2; a local Python may
+  differ):
+  ```bash
+  docker run --rm --network ecews_tf_monitor_default -e PYTHONPATH=/work \
+    -e TEST_DATABASE_URL="postgresql://<user>:<password>@db:5432/ecews_test" \
+    -v "$(pwd)/backend:/work" -w /work ecews_tf_monitor-api pytest -q
+  ```
+  **186 passing** (23 Oct 2026).
+- **Frontend tests:** `cd frontend && npx vitest run` — **132 passing**. Type check:
+  `npx tsc --noEmit`.
+- **Harness pages** (`/app/harness-*.html` on the Vite dev server) render each page
+  with synthetic data and no backend, for checking in a real browser without
+  signing in.
 
-These are settled decisions, each verified against the real 11 July export. The
-spec (`..._v3_1.md`) is authoritative; this is the short list.
+**Loading a line list:** run the weekly pipeline (`docs/RUNBOOK_pipeline.md`), then
+Admin → Line lists → load the de-identified parquet zip. **Set the line-list date to
+the treatment line list's date**: it sets the fiscal quarter and the follow-up
+windows.
 
-1. **Unit of analysis = FAILURE EPISODE**, key `(S/N, index_VL_date, index_VL_value)`
-   — never S/N alone. 308 clients have >1 episode; collapsing on S/N deletes them.
-   **Rates use episodes as the denominator.**
+## 3. Pages (React, `/app`)
+
+| Page | What it shows |
+|---|---|
+| Overview | Headline tiles, time-to-event strip, narrative and cohort, EAC and outcome charts split by sex, monthly unsuppressed columns, quarterly cascade, facility league, zero-EAC facilities |
+| Cascade | Every step against the whole cohort with its own rate and denominator, optional split by sex, where the cohort is lost, the outcome; each gap opens its worklist |
+| Deep dive | Who / What / Care outcome / When / Where, bars split by sex, per-client cohort flow (entering and leaving), the clickable LGA residence map, facility league, flags ranked by priority |
+| DTC review | Switch gap, VL response (log drop), laboratory queue, per-client VL trajectories, repeat-unsuppression odds ratios, DTC worklists |
+| Time metrics | Four medians, six timed steps as box plots against targets, Kaplan-Meier to re-suppression, time on ART to first unsuppressed VL by ART-start era |
+| Line list changes | Any two snapshots compared: days apart, episodes carried / new / gone, cascade movement with backwards steps marked |
+| Worklists | Twelve lists ranked by clinical urgency, each with its next step; sortable table, server-side audited export (admin/analyst) |
+| Treatment plans | Plans A–H with the reason each applies, split by sex; a plan opens its clients |
+| Advanced analytics | Factors for re-suppression (forest plot, univariate and adjusted table), baseline CD4, the risk model with calibration and the lowest-chance list, mortality |
+| Data quality | Every check from the current upload, cohort checks apart from source-file checks |
+| Guidelines | 2024 national EAC guidance and where each rule is measured |
+| Methodology | Unit of analysis, cohort, who counts as a gap, definitions, data sources (every sheet read), known gaps |
+| Admin | Load line lists, upload history, deployment check, users and access (add, change role and scope, disable, delete, reset password), usage, feedback, audit trail |
+
+The header carries data notices (serious cohort problems), the theme toggle, and the
+account menu: change your own password, send feedback, sign out. Every summary table
+sorts; female and male keep one colour pair everywhere.
+
+**Roles:** admin / analyst / viewer. Viewers and analysts see everything except
+Admin; analysts can also export. A state or facility scope limits everything an
+account sees, exports included.
+
+## 4. Locked analytical rules (do not silently change)
+
+Figures in brackets are as at the date each rule was agreed. The full reasoning is
+in the spec and in `docs/DECISIONS_AND_INCIDENTS.md`.
+
+1. **Unit of analysis = failure episode**, key `(S/N, index VL date, index VL value)`,
+   never S/N alone. Rates use episodes as the denominator.
 2. **Cohort = quarterly open cohort** from the cumulative Total Unsuppressed register.
-   `event` mode is **retired**.
-3. **S/N is TEXT end-to-end** (needs 12+ dp to stay unique). Excel re-save breaks joins.
-4. **No VL-validity window.** The 12-month rule was **expunged** (§2.10) — it deleted
-   563 real FY25Q4 episodes and destroyed the register's history. Episode age is
-   expressed by the FY quarter, never by exclusion.
-5. **FY25Q4 floor:** everything received on/before 30 Sep 2025 → FY25Q4 (a floor, not
-   a filter — nothing dropped). Kills phantom FY22/23/24 buckets.
-6. **All viral loads come from the CLINICAL line lists, never the EAC sheet** (§2.12).
-   Follow-up VL = the client's **next VL after the index result was received** (any
-   later VL, from Total Unsuppressed or the Treatment list, whichever sampled first).
-   - Neutralises success-censoring (May/June sheets read for session dates only).
-   - Follow-up coverage rose 20.8% → **47.2%**.
-   - A repeat failure resolves automatically as a failed switch on the earlier episode.
-7. **Dates:** quarter/cohort by **date result received at facility**; follow-up by
-   **sample collection date**, after the index result was received. **A sample and a
-   result are separate facts** (19 Aug 2026): the sample date says a post-EAC sample
-   exists; the result columns say a result exists. While a sample is at the lab the
-   line list carries the new sample date but the index result, so counting the date
-   as a result double-counted the index — 247 of 2,089. Sample coverage and
-   re-suppression are unchanged; 241 episodes move to **awaiting result**, and
-   switch-eligible falls 599 → 370. See Plan v3.1 §2.8.
-8. **EAC dated before index = "not yet commenced"** — retained in cohort, counted as
-   no-EAC (not dropped).
-9. **Switching:** numerator = on **2nd/3rd line** in the Treatment list; denominator =
-   **every episode whose follow-up VL is still ≥ 1,000** (#9b). **No switch date in the
-   export → time-to-switch is not computable** (deferred).
-10. `as_of` **anchors to the line-list date, not today** (the old rolling window is why
-    the count drifted 2,845→2,832 across days).
-11. **EAC completed vs Post-EAC VL (team review, 17 Jul 2026):** *Completed EAC* =
-    sessions 1+2+3 recorded **plus ≥30 days** since session 3 → **46.6% (1,294)**.
-    *Post-EAC VL* = sessions 1–3 **plus a VL sample on/after session 3**, no 30-day rule →
-    **748** (cascade step 61). New gap flag `awaiting_vl` = completed but no post-EAC
-    sample (**550**). Follow-up VL (any later VL) stays as-is for QC; converges as EMR EAC
-    upload → 100%.
-12. **Truncation is two cohorts:** `trunc_pre` = sample before session 1, cycle never
-    started (**273**, negative lead time — its own worklist + high-severity DQ finding);
-    `trunc_mid` = sampled after S1/S2 but before S3 (**416**). Neither invalidates the
-    cascade (flag-only, per team).
-13. **Nomenclature:** "repeat failure" → **repeat unsuppression episode**; "Awaiting
-    switch" → **Awaiting DTC review** (display only; column/flag names unchanged).
-14. **Switch gap (team review, 19 Jul):** a genuine switch needs the regimen line **at the
-    index VL** (Total Unsuppressed `CurrentRegimenLine`) to have been 1st line. 524 still
-    ≥1,000 splits three ways: **awaiting DTC review 484** (1st@index, still 1st),
-    **prior switch 29** (already 2nd/3rd @index — cannot re-switch without resistance
-    testing, need DTC drug-history + VL review), **genuinely switched 11** (1st@index → now
-    2nd/3rd). Flags: `awaiting_switch`, `prior_switch`, `switched`. The old "37 switched"
-    conflated the 29 prior-switch clients.
-15. **CD4 is binary** (`cd4_band` <200 vs ≥200), merging the old quantitative assay with
-    the new VISITEC LFA (`CD4_LFA_Result`); both valid. Coverage 33% → **47%**.
-16. **Pregnancy** is reported on a **female denominator** (males set to N/A upstream).
-17. **Time-to-VL** from `ART_Start_Date`: first-ever VL and first-**unsuppressed** VL.
-    **Confounded by ART-start ERA** (routine VL scaled up with Test-and-Treat ~2017/18):
-    ART→first-VL median 0.5 yr for ≥2018 starters vs 4.0 yr for ≤2017 (detection lag, not
-    delay). Time-metrics has an **era-stratified cumulative-incidence curve** of time to
-    first unsuppression (`/unsupp-curve`); never pool the two eras.
+3. **S/N is text end-to-end** (12+ decimal places to stay unique).
+4. **No VL-validity window.** Episode age is expressed by the fiscal quarter, never by
+   exclusion.
+5. **FY25Q4 floor:** everything received on or before 30 Sep 2025 sits in FY25Q4.
+6. **All viral loads come from the treatment line lists, never the EAC sheet.**
+   Follow-up VL = the next VL sampled after the index result was received.
+7. **A sample and a result are separate facts.** Quarter by date the result was
+   received; follow-up by sample date.
+8. **EAC dated before the index = not yet commenced** (kept, counted as no EAC).
+9. **Switching:** numerator on 2nd/3rd line; denominator every episode still ≥ 1,000.
+   No switch date in the export, so time to switch cannot be measured.
+10. **`as_of` anchors to the line-list date**, not today.
+11. **EAC completed** = sessions 1–3 plus ≥ 30 days since session 3. **Post-EAC VL** =
+    sessions 1–3 plus a sample on or after session 3, no 30-day rule.
+12. **Truncation is two cohorts:** sample before session 1 (`trunc_pre`) and before
+    session 3 (`trunc_mid`). Flag only.
+13. **Nomenclature:** "repeat unsuppression episode"; "Awaiting DTC review".
+14. **Switch gap** needs the regimen line at the index VL: awaiting DTC review / prior
+    switch / genuinely switched.
+15. **CD4 is binary** (< 200 vs ≥ 200), quantitative and VISITEC LFA merged.
+16. **Pregnancy** on a female denominator.
+17. **Time to VL is confounded by ART-start era**; never pool ≤ 2017 and ≥ 2018 starters.
+18. **The key is DATIM code + PEPID.** A client who transfers is linked to one S/N:
+    keep the Active record's, else the transfer-in, else the latest pickup. Different
+    people sharing a facility-assigned number are never linked (decision 19).
+19. **Clients who left care before a repeat VL are not a gap** (decision 20): own
+    cascade step and worklist, out of every gap measure.
+20. **Worklists are ranked by clinical urgency** (decision 21).
 
-**Recurring bug to guard #1:** after a merge, `fillna(False)` on an object-dtype boolean
-leaves object dtype and breaks the `~` operator. Always chain `.fillna(False).astype(bool)`.
+**Recurring bugs to guard:** chain `.fillna(False).astype(bool)` after a merge; never
+hold a `Series` across `sort_values().reset_index()` in `build_cohort`; cast a
+categorical to object before filling it (pandas 2.2).
 
-**Recurring bug to guard #2 (found & fixed 16 Jul):** never hold a `Series` across
-`sort_values().reset_index()` in `build_cohort` — pandas re-aligns on index labels and
-silently pairs each row with a *different* row. A stale `s1` corrupted EAC lead time
-(showed 2.8 mo; really **~4.9 mo / 169 d median**) and the truncation counts. Re-bind
-from `df[...]` at point of use. Tell-tale: two indicators that are arithmetically
-impossible together (146 episodes "negative lead" AND "completed").
-
----
-
-## 4. Current headline figures (11 Jul 2026 export, all episodes)
-
-**Title:** ECEWS-SPEED Treatment Failure Monitoring Dashboard.
-
-**Repeat unsuppression (labels corrected 19 Jul):** **294 clients** unsuppressed >1 time,
-accounting for **602 episodes** (294 first + 308 repeats). "308" = repeat *occurrences*, NOT
-clients — the old headline mislabelled it. `repeats`=308, `repeat_clients`=294.
+## 5. Current figures (line list of 16 Oct 2026, all episodes)
 
 | Metric | Value |
 |---|---|
-| Episodes / clients / repeat-occurrences | **3,797 / 3,489 / 308** (294 repeat clients) |
-| Quarters | FY25Q4 1,201 · FY26Q1 826 · FY26Q2 824 · FY26Q3 938 · FY26Q4 8 |
-| Cohort | 67.0% female · 10.5% adolescents · 3.8% under-10 · median 77 mo on ART · 96.0% first-line |
-| EAC commenced | 73.2% (2,779) — **1,018 never started** |
-| EAC completed (S1+2+3 + 30d) | **46.6% (1,294)** |
-| Post-EAC VL sample (step 61) | 748 · gap `awaiting_vl` = **550** |
-| Follow-up VL done (QC) | **47.2%** (1,793) — 2,004 with no later VL |
-| Re-suppressed | 70.8% (1,269) · F 71.4% / M 69.5% · Delta 68.6% / Ekiti 74.6% / Osun 74.5% |
-| Time-to-event medians | to-EAC 25 d · **EAC lead 169 d** · to-resupp 169 d · months unsupp 7.7 |
-| Still ≥ 1,000 (DTC-eligible) | **524** |
-| Switched to 2nd/3rd line | 37 (7.1%) |
-| **Awaiting DTC review** | **487** ← the number most likely to be challenged in review |
+| Episodes / clients | **4,824 / 4,275** — 469 clients unsuppressed more than once (549 repeat episodes) |
+| Quarters | FY25Q4 1,283 · FY26Q1 850 · FY26Q2 885 · FY26Q3 975 · FY26Q4 787 · FY27Q1 44 |
+| Left care before a repeat VL | 322 (6.7%) — out of every gap measure; 4,502 in care or retested |
+| EAC commenced | **85.1%** (3,830) — 672 never started |
+| EAC completed (S1–3 + 30 days) | 52.4% of those who commenced (2,008) |
+| Post-EAC VL sample | 1,216 |
+| Follow-up VL sample / result | 2,626 (58.3%) / 2,390 (53.1%) of those in care or retested |
+| Re-suppressed | **77.6%** (1,855) — 1,540 undetectable, 315 low-level viraemia |
+| Still ≥ 1,000 | 535 · **awaiting DTC review 478** · switched 26 (4.9%) |
+| Medians | to EAC 25 d · EAC lead 167 d · to re-suppression 168 d · months unsuppressed 8.8 |
+| Risk model | AUC 0.862 on 2,390 retested episodes |
 
-**Deep-dive inference (re-suppression, adjusted):** adolescents 10–19 AOR **0.53** (0.35–0.80),
-Osun AOR **1.31** (1.02–1.70), longer on ART AOR **0.94/yr**. Baseline CD4 descriptive only
-(33% coverage) but gradient sig: <200 60.3% → ≥500 76.5% (χ² p=0.007).
+Previous snapshot: 14 Aug 2026 (4,228 episodes). Line list changes compares the two.
 
-Zero-EAC facilities (volume ≥ 20, zero sessions on record — entry issue, follow up):
-**Okwe 129 · Otu Jeremi 61 · Umutu 34 · Ijero 28 · Iwo 28.**
-
----
-
-## 5. Repo layout
+## 6. Repo layout
 
 ```
-ecews/
-├── PROJECT_STATUS.md                                   ← this file
+├── PROJECT_STATUS.md                 ← this file
 ├── EAC_Indicator_Definitions_and_Data_Analysis_Plan_v3_1.md   ← the spec
-├── docker-compose.yml
-├── README.md
-└── backend/
-    ├── Dockerfile, requirements.txt, .env.example
-    ├── app/
-    │   ├── indicators.py   ← core engine: build_cohort(), cascade(), time_metrics(),
-    │   │                      kaplan_meier(), breakdown(), profile() [who/what/when/where],
-    │   │                      deep_dive() [hand-rolled OR/AOR/χ²/trend/Mann–Whitney],
-    │   │                      resuppression_model(), mortality(), _plan(), _lga_res_map()
-    │   ├── main.py         ← FastAPI; /overview /cascade /summary /breakdown/{dim}
-    │   │                      /plans /time-metrics /survival /risk /mortality /deep-dive
-    │   │                      /profile /dq /clients /filters (cascading) /uploads /login
-    │   ├── ingest.py       ← _read() (xlsx/parquet/zip), dq_checks(), ingest_workbook()
-    │   ├── schema.sql      ← users, uploads (+sources), cohort (+socio-demo/CD4/residence
-    │   │                      /post_eac_vl/trunc_pre/mid via ALTER…IF NOT EXISTS), dq_findings
-    │   └── security.py     ← JWT + bcrypt (passlib dropped)
-    ├── scripts/
-    │   ├── deidentify.py       ← the weekly pipeline: vault, keys, register, parquet
-    │   ├── weekly.ps1          ← the routine in one command; never passes --migrate-keys
-    │   ├── 1 - Rehearse pipeline.bat / 2 - Run pipeline.bat   ← the double-click route
-    │   ├── diagnose_key.py     ← why did the key check drop? shapes only, safe to paste
-    │   ├── inspect_export.py   ← describe a raw export without revealing a patient
-    │   ├── check_js.py         ← node --check on the inline script; CI job "javascript"
-    │   ├── setup_secure.py, resolve_vault_duplicates.py, recover_unkeyed_eac.py
-    │   └── to_parquet.py
-    ├── static/index.html            ← whole frontend (login, 10 pages, filters, charts)
-    ├── static/nga_lga_3states.geojson      ← 71 LGA polygons (Delta/Osun/Ekiti)
-    └── static/nga_context_states.geojson   ← 11 neighbouring states (grey map context)
+├── docs/DECISIONS_AND_INCIDENTS.md   ← standing rules, decisions 1–21
+├── docs/RUNBOOK_pipeline.md          ← the weekly de-identification routine
+├── docker-compose.yml, .env.example, DEPLOY.md
+├── backend/
+│   ├── Dockerfile                    ← builds frontend/ in a first stage, serves it at /app
+│   ├── app/indicators.py             ← the indicator engine (cohort, cascade, flags, models)
+│   ├── app/main.py                   ← FastAPI routes, auth, audit, exports
+│   ├── app/ingest.py, schema.sql, security.py
+│   ├── scripts/deidentify.py, weekly.ps1, deploy.ps1, inspect_export.py, diagnose_key.py
+│   └── static/index.html             ← the original single-file dashboard (served at /)
+└── frontend/                         ← React 19 + Vite + Tailwind v4 + shadcn (Base UI)
+    ├── src/pages/                    ← one file per page, each with a test
+    ├── src/components/, src/core/    ← shared UI, API client, filters, palette, theme
+    ├── src/dev/                      ← synthetic fixtures and harness pages
+    └── src/styles/merged-theme.css   ← the Octet + LearnUI merged theme
 ```
 
-**Backend changes need `docker compose up --build`** (no source mount — code is COPYed
-into the image). **Indicator/ingest changes also need re-uploading** the workbook (cohort
-columns are computed at ingest). New cohort columns use `ALTER TABLE … ADD COLUMN IF NOT
-EXISTS` in schema.sql, so no `down -v` is required. `.env` sets `ADMIN_PASSWORD=blindalley`.
+## 7. Pending
 
-**Frontend hardening:** the Overview renderer is wrapped in a guard that degrades any
-render error to a single visible message in one card — a lost identifier can no longer
-blank the page. (This replaced the recurring "X is not defined" full-page crash.)
+**Build**
+1. **Merge `react` into `main`** for IT to deploy — on Es's approval.
+2. **Deep dive: a box plot of the wait for a follow-up VL.** How long clients wait
+   between the index result and their repeat sample: median, middle half and range,
+   so a few very long waits do not hide the typical one. Built in August and
+   withdrawn because the data under it was empty at the time; the data is now there.
+   Optional.
+3. **EAC uptake by month** — withdrawn. If rebuilt, recent months must be marked
+   provisional: uptake in a young month is low because commencing takes a median of
+   25 days, not because teams stopped.
+4. **Per-client hover timeline** (ART start, every VL, regimen changes, interruptions,
+   missed appointments on one date axis) — waits for the drug, VL history and
+   appointment file (Es to locate).
 
----
+**Dropped (Es, 23 Oct 2026):** click-to-filter cards (the clickable map is enough);
+bulk user creation by spreadsheet (the HI team will handle accounts).
 
-## 5a. Pending development (built, withdrawn, to return to)
+**For the HI / EMR team**
+1. **`EAC_Cycle_Number` is unusable.** In the 16 Oct line list every episode reads
+   cycle 1 (or 0, or a corrupted `1/0/1900`), so the High-priority worklist "More than
+   2 EAC cycles, still failing" can never fill: it shows 0. Fixing the column, or
+   agreeing to count cycles another way, is needed before that list means anything.
+2. **14 people are Active at more than one facility** (22 Oct pipeline run). They are
+   not linked; the list is `SN_Key-TWO-ACTIVE.csv` on Es's machine. HI to close the
+   duplicate record.
+3. **Switch date and "reason not switched"** — unlock time to switch.
+4. **`First_High_VL_Value` is the first detectable VL** (floor at 50, not 1,000), and
+   68 rows have it below `First_Ever_VL`. The label stays until HI confirms the
+   definition.
+5. Baseline CD4 coverage; EAC session dates out of order; blank S/Ns in EAC lists
+   (2–41 rows per sheet); state casing.
 
-**Entry/exit flow and the wait box on the Deep dive timing panel.** Built on
-19–22 Aug and withdrawn the same week. Both depend on `fu_date`, which was NULL
-for every episode until the fix in the same batch, so on any snapshot ingested
-before it the exits line reads flat zero and the box does not draw at all —
-which is what Es saw, and it looks like a defect rather than a stale snapshot.
+**Resolved on our side, nothing for HI to do:** the PEPIDs found under more than one
+DATIM code (5,893 on 22 Oct). The key concatenates the DATIM code and PEPID, so no
+two people are merged. Of these, 3,529 are one person at two facilities after a
+transfer and are linked to one S/N; 2,350 are different people who happen to share a
+facility-assigned number and stay apart. Only the 14 above remain.
 
-The data layer stays: `fu_date` is now derived from whichever source supplied
-the follow-up value, and the overview payload still carries `monthly.exits` and
-`when.wait`. Nothing renders them. When we return, a snapshot ingested after
-`5191344` populates both, and the figures were: median wait **200 days**, IQR
-155–281, n=1,877, with 273 still waiting.
+**For Es:** check `SN_Key-NEAR-MATCH.csv` and `SN_Key-PEPID-BLANK.csv` beside the
+vault; locate the drug, VL history and appointment file.
 
-The box plot is the right form for the wait — a duration whose maximum is 1,415
-days needs a median and a spread, not a mean. That was built and never seen,
-for the same reason.
-
-**EAC uptake by month.** Also withdrawn. The month filter it was built
-alongside is kept. The maturation finding it surfaced is worth keeping even
-though the chart is gone: uptake by month tracks month AGE almost exactly (91%
-at 136 days old, 70% at 75, 44% at 14), because commencing EAC takes a median
-25 days and p90 168. Any future version of this chart has to mark recent months
-provisional or it will report a collapse from 95% to 37% that is arithmetic.
-
-## 5b. Open questions with the HI team
-
-0. **5,857 PEPIDs appear under more than one DATIM code** (5 Sep 2026 export).
-   The pipeline reports this every run. It is the reason the facility code stays
-   in the key — keying on PEPID alone would merge two patients into one S/N — so
-   it is not a blocker, but it distorts any denominator counting *people*.
-
-   Leading explanations are transfers not closed out at the sending facility, and
-   genuine duplicate enrolment. **Es has a hypothesis to test (9 Sep 2026);
-   awaiting that before taking it to HI.** Whatever the cause, the key does not
-   change — see `docs/DECISIONS_AND_INCIDENTS.md`, Standing rule 2.
-
-1. **`First_High_VL_Value` does not mean what its name says.** It has a hard floor
-   at **50, not 1,000** — the lowest values present are 50.0, 50.1, 50.2 — so it is
-   the first *detectable* viral load, not the first unsuppressed one. 62.5% of it is
-   low-level viraemia, median 292, and that proportion is stable across every sheet
-   that carries the column (62.5 / 62.5 / 63.9 / 62.5%), which makes it a definition
-   rather than a defect.
-
-   The trajectory colouring is unaffected — green below 1,000, red at or above,
-   matching the suppression threshold used everywhere else and in PEPFAR reporting.
-   What is affected is the **label**: the tooltip reads "First high VL", which a
-   clinician will take to mean ≥1,000. **Left unchanged pending HI's definition**
-   (19 Aug 2026) rather than renamed on our own inference.
-
-   Also flagged: **68 rows have `First_High_VL` lower than `First_Ever_VL`**, which
-   should not be possible under any reading of the two columns.
-
-2. **Drug history, IIT history, appointment compliance and visit dates** are to come
-   from a separate file that Es will supply.
-
-   **To build on that branch — a hover timeline per client.** The trajectory table
-   currently shows one coloured block per viral load, which reads well at a glance
-   but flattens time: two results three years apart look the same as two results
-   three months apart. On hover, show a proper timeline instead, plotted on a real
-   date axis:
-
-   - **ART start** — already in the cohort as `art_year` / `days_on_art`, so this
-     costs nothing to add and is the anchor the rest hangs off
-   - **First ever VL**, **first detectable VL** *(subject to the naming question in
-     item 1 above)*, any results in between, and the **current VL**
-   - once the separate dataset lands: **regimen changes**, **interruptions and
-     returns**, and **missed appointments** on the same axis
-
-   The point of doing it together rather than in two passes is that a viral load
-   rising three months after an interruption, or two months after a regimen change,
-   is a different clinical story from one rising against perfect adherence — and
-   that only reads if the events share an axis. Built separately, the VL timeline
-   would have to be redrawn to make room.
-
-   Deferred deliberately until the dataset arrives, so it is built once. Deliberately not taken from the current
-   line lists: `dateofFirstTldPickup` looked like a switch marker and is not — the
-   whole first-line cohort was transitioned to TLD as programme policy, so it would
-   have flagged a switch for almost everyone. Branch to be opened when the dataset
-   arrives.
-
-## 6. What's next (agreed direction)
-
-1. **Repeat-unsuppression / DTC-review page** (agreed, not yet built). Shape:
-   (a) cohort profile of the 308 repeat-unsuppression clients vs the rest;
-   (b) associations for *repeat unsuppression* (outcome = unsuppressed again — a different
-   denominator/model from re-suppression, which is why it can't share Deep dive);
-   (c) the switch gap — the 524 still ≥1,000 / 487 awaiting DTC review, who & where;
-   (d) exportable intervention worklist for the switch committee / DTC pathway.
-   **Limitation to state on the page:** no switch date and no "reason not switched" field,
-   so we show *who* is awaiting review and what correlates, not *why* they weren't switched.
-2. **Interactive cards** (click-to-filter → global re-slice; click bar → worklist).
-   Recommended, deferred to build alongside the v4 redesign so handlers aren't wired twice.
-3. **Contiguous-state map context** ✅ done (grey neighbours behind the LGA choropleth).
-4. Roll the new design language (sidebar layout from the approved v4 prototype) into the
-   real frontend — deferred until per-page indicators are settled so we don't restyle twice.
-
-**Open asks to the HI/EMR team (blocking better analysis):**
-- **Switch date / "reason not switched"** — highest-value missing fields; unlock
-  time-to-switch and true switch-gap root-cause.
-- Improve **baseline CD4 coverage** (33%) — may be a strong switch-triage predictor.
-- Fix **EAC session dates out of order** (S2/S3 before S1) and populate
-  `Followup_VL_Sample_Collection_Date` consistently.
-- Fix `EAC_Cycle_Number` (arrives as `1/0/1900`).
-- 87 blank-S/N rows; state casing (Delta/DELTA/Osun/OSUN/EKITI).
-
----
-
-## 7. Workflow preferences (Es)
+## 8. Workflow preferences (Es)
 
 - Plan → confirm → execute; explicit sign-off before major builds.
-- Positives-first, then gaps, then actionable next steps.
-- Granular LGA/facility breakdowns; eligibility-based denominators; 1-decimal rounding.
-- **No hallucinated figures** — cross-check every number against the data.
-- pptxgenjs native editable charts only (for slide deliverables; no image embeds).
+- Positives first, then gaps, then actionable next steps.
+- Granular LGA and facility breakdowns; eligibility-based denominators; 1-decimal
+  rounding.
+- **No hallucinated figures** — every number is checked against the data.
+- Work only from de-identified parquet, logs and the dashboard database; diagnostics
+  print counts and shapes, never identifiers.
+- Changes ship live to `/app` for Es to judge, not as mock-ups.

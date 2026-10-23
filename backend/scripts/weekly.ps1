@@ -48,9 +48,19 @@ if ((Get-Content $ini -Raw) -match 'PUT-THE-PASSWORD-HERE') {
     Fail "secure.ini still has the placeholder password. Open it and put the real one in."
 }
 
-$treat = Get-ChildItem -Path $DataDir -Filter '*Treatment*.xls*' -ErrorAction SilentlyContinue |
+# Treatment exports live in their own subfolder, like the EAC lists (22 Oct 2026).
+# Excel's ~$ lock files match the pattern too, so they are skipped.
+$treatDir = Join-Path $DataDir 'treatment'
+$treat = Get-ChildItem -Path $treatDir -Filter '*Treatment*.xls*' -ErrorAction SilentlyContinue |
+         Where-Object { $_.Name -notlike '~$*' } |
          Sort-Object LastWriteTime -Descending | Select-Object -First 1
-if (-not $treat) { Fail "no treatment export in $DataDir (looking for *Treatment*.xlsx)." }
+$stray = @(Get-ChildItem -Path $DataDir -Filter '*Treatment*.xls*' -File -ErrorAction SilentlyContinue |
+           Where-Object { $_.Name -notlike '~$*' })
+if ($stray.Count) {
+    Write-Host "  NOTE: $($stray.Count) treatment export(s) in the main folder are NOT read." `
+        "Move them into the treatment folder." -ForegroundColor Yellow
+}
+if (-not $treat) { Fail "no treatment export in $treatDir (looking for *Treatment*.xlsx)." }
 
 $age = [int]((Get-Date) - $treat.LastWriteTime).TotalDays
 Note "treatment export : $($treat.Name)  ($age day(s) old)"

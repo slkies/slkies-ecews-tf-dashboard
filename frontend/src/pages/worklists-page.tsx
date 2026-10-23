@@ -1,0 +1,446 @@
+import { createColumnHelper } from '@tanstack/react-table'
+import { Download, ListChecks } from 'lucide-react'
+import { useEffect, useMemo, useState } from 'react'
+import { cn } from 'cn'
+import { DataTable, SortableHeader } from '@/components/data-table/data-table'
+import type { DataTableFeatures } from '@/components/data-table/data-table-features'
+import FilterBar, { PinFiltersToggle } from '@/components/filter-bar'
+import { Alert, AlertDescription } from '@/components/ui/alert'
+import { Button } from '@/components/ui/button'
+import {
+  Card, CardAction, CardContent, CardDescription, CardHeader, CardTitle,
+} from '@/components/ui/card'
+import { Checkbox } from '@/components/ui/checkbox'
+import {
+  Empty, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle,
+} from '@/components/ui/empty'
+import { StatusBadge } from '@/components/status-badge'
+import { Skeleton } from '@/components/ui/skeleton'
+import { Spinner } from '@/components/ui/spinner'
+import { api } from '@/core/api'
+import { downloadExport } from '@/core/download'
+import { useFilters } from '@/core/filters'
+import { DASH, fmt, fmtDate } from '@/core/format'
+import { useSession } from '@/core/session'
+
+/**
+ * The worklists the backend defines (FLAGS in main.py). Needs-action lists are
+ * in priority order, most clinically urgent first (agreed 23 Oct 2026):
+ *
+ *   High   - a decision is overdue: failed after EAC and still on 1st line;
+ *            failing through more than two cycles; unsuppressed over a year
+ *            and never retested.
+ *   Medium - the next step has not happened: no post-EAC VL after a completed
+ *            cycle; no EAC at all; EAC started but not completed.
+ *   Low    - wider nets that overlap the lists above (unsuppressed > 6 months),
+ *            and clients who have left care, which is tracing, not EAC.
+ *
+ * Context and data checks are not ranked: they are for correcting records.
+ */
+export type Priority = 'High' | 'Medium' | 'Low'
+export const WORKLISTS: {
+  flag: string; label: string; group: 'Needs action' | 'Context and data checks'
+  rank?: number; priority?: Priority
+  /** What a facility team does next, in one line. */
+  next: string
+}[] = [
+  { flag: 'awaiting_switch', label: 'Still unsuppressed after EAC, awaiting DTC review', group: 'Needs action', rank: 1, priority: 'High',
+    next: 'Present at the next DTC meeting for a decision on the next regimen line.' },
+  { flag: 'dtc_review', label: 'More than 2 EAC cycles, still failing', group: 'Needs action', rank: 2, priority: 'High',
+    next: 'Refer to the DTC: repeated EAC has not worked, so adherence alone is unlikely to explain it.' },
+  { flag: 'never_retested', label: 'Active, unsuppressed over a year, never retested', group: 'Needs action', rank: 3, priority: 'High',
+    next: 'Collect a VL sample now. Without a repeat test, the failure is not being measured.' },
+  { flag: 'awaiting_vl', label: 'Completed EAC 30+ days ago, no post-EAC VL sample', group: 'Needs action', rank: 4, priority: 'Medium',
+    next: 'Collect the post-EAC VL sample. It was due once 30 days had passed since session 3.' },
+  { flag: 'no_eac', label: 'Unsuppressed with no valid EAC record', group: 'Needs action', rank: 5, priority: 'Medium',
+    next: 'Start EAC, or enter the sessions if they were held but not recorded.' },
+  { flag: 'eac_incomplete', label: 'Started EAC but not completed', group: 'Needs action', rank: 6, priority: 'Medium',
+    next: 'Book the remaining sessions. Three are needed before the repeat VL.' },
+  { flag: 'long_unsuppressed', label: 'Unsuppressed for more than 6 months', group: 'Needs action', rank: 7, priority: 'Low',
+    next: 'A wider net that overlaps the lists above. Check each client is on one of them.' },
+  { flag: 'exited_no_vl', label: 'Left care before a repeat VL', group: 'Needs action', rank: 8, priority: 'Low',
+    next: 'Trace and return to care. This is tracing work, not an EAC gap.' },
+  { flag: 'prior_switch', label: 'Already switched before the index VL', group: 'Context and data checks',
+    next: 'Context only: the client was already switched when the index VL was taken.' },
+  { flag: 'trunc_pre', label: 'Sample taken before EAC session 1', group: 'Context and data checks',
+    next: 'Check the dates. A sample taken before EAC began cannot measure the effect of EAC.' },
+  { flag: 'trunc_mid', label: 'Sample taken mid-cycle, before session 3', group: 'Context and data checks',
+    next: 'Check the dates. A sample taken before session 3 means the cycle was cut short.' },
+  { flag: 'prior_cycle', label: 'EAC session predates the index VL', group: 'Context and data checks',
+    next: 'Check the dates. A session dated before the index VL belongs to an earlier cycle.' },
+]
+
+const PRIORITY_TONE: Record<Priority, 'bad' | 'warn' | null> = { High: 'bad', Medium: 'warn', Low: null }
+
+/** A list's priority: High and Medium as status badges, Low as plain text, data checks marked as such. */
+export function PriorityMark({ priority }: { priority?: Priority }) {
+  if (!priority) return <span className="text-xs text-muted-foreground">Data check</span>
+  const tone = PRIORITY_TONE[priority]
+  return tone
+    ? <StatusBadge tone={tone}>{priority}</StatusBadge>
+    : <span className="text-xs text-muted-foreground">{priority}</span>
+}
+
+const ROW_LIMIT = 5000
+
+export interface ClientRow {
+  episode: string
+  sn: string
+  state: string | null
+  lga: string | null
+  facility: string | null
+  sex: string | null
+  age: number | null
+  art_status: string | null
+  idx_vl: number | null
+  recv_date: string | null
+  idx_samp: string | null
+  idx_date: string | null
+  sessions: number | null
+  eac_completed: boolean | null
+  fu_vl: number | null
+  /** Follow-up VL sample collected. */
+  fu_samp: string | null
+  /** Follow-up VL result received at the facility. */
+  fu_date: string | null
+  still_unsuppressed: boolean | null
+  switched: boolean | null
+  months_unsuppressed: number | null
+  treatment_plan: string | null
+}
+
+const LABELS: Record<string, string> = {
+  sn: 'Client', facility: 'Facility', state: 'State', sex: 'Sex', age: 'Age',
+  art_status: 'ART status', idx_vl: 'Index VL', idx_samp: 'Index VL sample collected',
+  recv_date: 'Index VL result received', sessions: 'EAC sessions', fu_vl: 'Follow-up VL',
+  fu_samp: 'Follow-up VL sample collected', fu_date: 'Follow-up VL result received',
+  months_unsuppressed: 'Months unsuppressed',
+  treatment_plan: 'Plan',
+}
+
+const col = createColumnHelper<DataTableFeatures, ClientRow>()
+
+function DateCell({ value }: { value: string | null }) {
+  return <span className="whitespace-nowrap tabular-nums">{fmtDate(value)}</span>
+}
+
+function useColumns() {
+  return useMemo(() => col.columns([
+    col.display({
+      id: 'select',
+      header: ({ table }) => (
+        <Checkbox checked={table.getIsAllPageRowsSelected()}
+                  indeterminate={table.getIsSomePageRowsSelected() && !table.getIsAllPageRowsSelected()}
+                  onCheckedChange={(v) => table.toggleAllPageRowsSelected(!!v)}
+                  aria-label="Select every row on this page" />
+      ),
+      cell: ({ row }) => (
+        <Checkbox checked={row.getIsSelected()} onCheckedChange={(v) => row.toggleSelected(!!v)}
+                  aria-label={`Select client ${row.original.sn}`} />
+      ),
+      enableSorting: false,
+      enableHiding: false,
+    }),
+    col.accessor('sn', {
+      header: ({ column }) => <SortableHeader column={column} title="Client" />,
+      // S/N is a pseudonymous key. Shortened for width; the full key is on hover.
+      cell: ({ getValue }) => (
+        <span className="font-mono text-xs text-muted-foreground" title={getValue()}>
+          {String(getValue()).slice(0, 10)}…
+        </span>
+      ),
+      enableHiding: false,
+    }),
+    col.accessor('facility', {
+      header: ({ column }) => <SortableHeader column={column} title="Facility" />,
+      cell: ({ getValue }) => (
+        <span className="block max-w-[16rem] truncate" title={getValue() ?? undefined}>{getValue() ?? DASH}</span>
+      ),
+    }),
+    col.accessor('state', {
+      header: ({ column }) => <SortableHeader column={column} title="State" />,
+      cell: ({ getValue }) => getValue() ?? DASH,
+    }),
+    col.accessor('sex', {
+      header: ({ column }) => <SortableHeader column={column} title="Sex" />,
+      cell: ({ getValue }) => getValue() ?? DASH,
+    }),
+    col.accessor('age', {
+      header: ({ column }) => <SortableHeader column={column} title="Age" align="right" />,
+      cell: ({ getValue }) => <span className="block text-right tabular-nums">{getValue() ?? DASH}</span>,
+    }),
+    // The index VL and the follow-up VL side by side, each with the day the
+    // sample was drawn and the day the result reached the facility, so staff
+    // can check a list against their records without opening the line list.
+    col.group({
+      id: 'index_vl',
+      header: 'Index VL',
+      columns: col.columns([
+        col.accessor('idx_vl', {
+          header: ({ column }) => <SortableHeader column={column} title="Copies/mL" align="right" />,
+          cell: ({ getValue }) => <span className="block text-right tabular-nums">{fmt(getValue())}</span>,
+        }),
+        col.accessor('idx_samp', {
+          header: ({ column }) => <SortableHeader column={column} title="Sample collected" />,
+          cell: ({ getValue }) => <DateCell value={getValue()} />,
+        }),
+        col.accessor('recv_date', {
+          header: ({ column }) => <SortableHeader column={column} title="Result received" />,
+          // Every quarter and trend is bucketed on this date, not the sample date.
+          cell: ({ row }) => <DateCell value={row.original.recv_date ?? row.original.idx_date} />,
+        }),
+      ]),
+    }),
+    col.accessor('sessions', {
+      header: ({ column }) => <SortableHeader column={column} title="Sessions" align="right" />,
+      cell: ({ getValue }) => <span className="block text-right tabular-nums">{getValue() ?? 0}</span>,
+    }),
+    col.group({
+      id: 'follow_up_vl',
+      header: 'Follow-up VL',
+      columns: col.columns([
+        col.accessor('fu_vl', {
+          header: ({ column }) => <SortableHeader column={column} title="Copies/mL" align="right" />,
+          cell: ({ row }) => {
+            const r = row.original
+            // Sample drawn, laboratory not yet reported: a lab follow-up, not a
+            // missing test, and it reads differently from a blank.
+            if (r.fu_vl == null && r.fu_samp) {
+              return <span className="block text-right whitespace-nowrap text-muted-foreground">Awaiting result</span>
+            }
+            return (
+              <span className={cn('block text-right tabular-nums', r.still_unsuppressed && 'font-medium text-bad')}>
+                {fmt(r.fu_vl)}
+                {r.still_unsuppressed && <span className="sr-only"> (still unsuppressed)</span>}
+              </span>
+            )
+          },
+        }),
+        col.accessor('fu_samp', {
+          header: ({ column }) => <SortableHeader column={column} title="Sample collected" />,
+          cell: ({ getValue }) => <DateCell value={getValue()} />,
+        }),
+        col.accessor('fu_date', {
+          header: ({ column }) => <SortableHeader column={column} title="Result received" />,
+          cell: ({ getValue }) => <DateCell value={getValue()} />,
+        }),
+      ]),
+    }),
+    col.accessor('months_unsuppressed', {
+      header: ({ column }) => <SortableHeader column={column} title="Months" align="right" />,
+      cell: ({ getValue }) => <span className="block text-right tabular-nums">{getValue() ?? DASH}</span>,
+    }),
+    col.accessor('art_status', {
+      header: ({ column }) => <SortableHeader column={column} title="ART status" />,
+      cell: ({ getValue }) => getValue() ?? DASH,
+    }),
+    col.accessor('treatment_plan', {
+      header: ({ column }) => <SortableHeader column={column} title="Plan" />,
+      cell: ({ getValue }) => (
+        <span className="block max-w-[12rem] truncate" title={getValue() ?? undefined}>{getValue() ?? DASH}</span>
+      ),
+    }),
+  ]), [])
+}
+
+/**
+ * A list's client rows, sortable and searchable, with the server-side export
+ * for analysts and administrators. `exportPath` is the filtered /export query
+ * the download repeats; `flag` narrows it to one worklist. Shared with the
+ * Treatment plans page.
+ */
+export function ClientTable({ rows, exportPath, flag, caption, loading = false }: {
+  rows: ClientRow[]; exportPath: string; flag?: string; caption?: string; loading?: boolean
+}) {
+  const { me } = useSession()
+  const canExport = me?.role === 'admin' || me?.role === 'analyst'
+  const columns = useColumns()
+  const [exporting, setExporting] = useState<'selected' | 'all' | null>(null)
+  const [exportErr, setExportErr] = useState<string | null>(null)
+
+  async function runExport(kind: 'selected' | 'all', selected: ClientRow[]) {
+    setExporting(kind); setExportErr(null)
+    try {
+      if (kind === 'selected') {
+        await downloadExport(exportPath, { flag, episodes: selected.map((r) => r.episode) })
+      } else {
+        const sep = exportPath.includes('?') ? '&' : '?'
+        await downloadExport(flag ? `${exportPath}${sep}flag=${flag}` : exportPath)
+      }
+    } catch (e) {
+      setExportErr(e instanceof Error ? e.message : 'Export failed')
+    } finally {
+      setExporting(null)
+    }
+  }
+
+  return (
+    <>
+      {exportErr && (
+        <Alert variant="destructive" className="mb-3"><AlertDescription>{exportErr}</AlertDescription></Alert>
+      )}
+      <div className={cn('transition-opacity', loading && 'pointer-events-none opacity-60')}>
+        <DataTable columns={columns} data={rows}
+                   getRowId={(r) => r.episode} searchColumn="facility"
+                   searchPlaceholder="Search facilities" columnLabels={LABELS}
+                   // Off by default so the table fits a laptop; the list
+                   // is mostly Active anyway, and exports are Active only.
+                   hiddenColumns={['art_status']}
+                   caption={caption} emptyText="No facility matches that search."
+                   actions={(selected) => canExport && (
+                     <>
+                       <Button variant="outline" size="sm" disabled={!selected.length || exporting !== null}
+                               onClick={() => runExport('selected', selected)}>
+                         {exporting === 'selected' ? <Spinner /> : <Download />}
+                         Export selected{selected.length ? ` (${fmt(selected.length)})` : ''}
+                       </Button>
+                       <Button size="sm" disabled={exporting !== null}
+                               onClick={() => runExport('all', selected)}>
+                         {exporting === 'all' ? <Spinner /> : <Download />}
+                         Export all active
+                       </Button>
+                     </>
+                   )} />
+      </div>
+    </>
+  )
+}
+
+/** `initialFlag` opens a particular list, e.g. when arriving from a cascade step. */
+export default function WorklistsPage({ initialFlag = null }: { initialFlag?: string | null } = {}) {
+  const { query, options } = useFilters()
+  const { me } = useSession()
+  const canExport = me?.role === 'admin' || me?.role === 'analyst'
+
+  const [counts, setCounts] = useState<Record<string, number | null> | null>(null)
+  const [flag, setFlag] = useState<string | null>(initialFlag)
+  const [rows, setRows] = useState<ClientRow[] | null>(null)
+  const [loadingRows, setLoadingRows] = useState(false)
+  const [err, setErr] = useState<string | null>(null)
+
+  // Counts for every list, under the current filters.
+  useEffect(() => {
+    if (!options) return
+    let cancelled = false
+    api<{ flag: string; n: number | null }[]>(`/worklists${query}`)
+      .then((r) => {
+        if (cancelled) return
+        const c = Object.fromEntries(r.map((x) => [x.flag, x.n]))
+        setCounts(c)
+        // Open the first list that has anyone on it, unless one is already open.
+        setFlag((cur) => cur ?? WORKLISTS.find((w) => (c[w.flag] ?? 0) > 0)?.flag ?? WORKLISTS[0]!.flag)
+      })
+      .catch((e: unknown) => { if (!cancelled) setErr(e instanceof Error ? e.message : 'Could not load the worklists') })
+    return () => { cancelled = true }
+  }, [query, options])
+
+  // The rows of the open list.
+  useEffect(() => {
+    if (!flag || !options) return
+    let cancelled = false
+    setLoadingRows(true)
+    const sep = query ? '&' : '?'
+    api<ClientRow[]>(`/clients${query}${sep}flag=${flag}&limit=${ROW_LIMIT}`)
+      .then((r) => { if (!cancelled) { setRows(r); setErr(null) } })
+      .catch((e: unknown) => { if (!cancelled) setErr(e instanceof Error ? e.message : 'Could not load the list') })
+      .finally(() => { if (!cancelled) setLoadingRows(false) })
+    return () => { cancelled = true }
+  }, [flag, query, options])
+
+  const current = WORKLISTS.find((w) => w.flag === flag)
+  const total = flag ? counts?.[flag] ?? null : null
+  const capped = total != null && total > ROW_LIMIT
+
+  return (
+    <div className="flex flex-col gap-6">
+      <div className="flex flex-wrap items-end justify-between gap-4">
+        <div className="flex flex-col gap-1">
+          <h1 className="text-2xl font-bold tracking-tight text-balance">Worklists</h1>
+          <p className="max-w-3xl text-sm text-muted-foreground">
+            The episodes each follow-up step is waiting on, under the filters below. Choose a
+            list, sort and search it, and select the rows a team will work.
+          </p>
+        </div>
+        <PinFiltersToggle />
+      </div>
+
+      <FilterBar />
+
+      {err && (
+        <Alert variant="destructive"><AlertDescription>{err}</AlertDescription></Alert>
+      )}
+
+      {/* The lists sit beside the table only on very wide screens. On a laptop
+          the table needs the full width: with both viral loads and their dates
+          it is about 1,500px, and beside the lists half of it was off-screen. */}
+      <div className="grid items-start gap-4 2xl:grid-cols-[18rem_minmax(0,1fr)]">
+        <nav aria-label="Worklists" className="grid gap-4 md:grid-cols-2 2xl:flex 2xl:flex-col">
+          {(['Needs action', 'Context and data checks'] as const).map((group) => (
+            <div key={group} className="flex flex-col gap-1">
+              <span className="px-2 text-[11px] font-medium tracking-[0.08em] text-muted-foreground uppercase">
+                {group}
+              </span>
+              {WORKLISTS.filter((w) => w.group === group).map((w) => {
+                const n = counts?.[w.flag]
+                const on = w.flag === flag
+                return (
+                  <button key={w.flag} type="button" onClick={() => setFlag(w.flag)}
+                          aria-current={on ? 'true' : undefined}
+                          className={cn(
+                            'flex items-start justify-between gap-3 rounded-lg px-3 py-2 text-left text-sm transition-colors',
+                            on ? 'bg-accent text-accent-foreground ring-1 ring-primary/25' : 'hover:bg-muted',
+                          )}>
+                    <span className="flex flex-col items-start gap-1">
+                      <span className="leading-snug">{w.label}</span>
+                      {w.priority && <PriorityMark priority={w.priority} />}
+                    </span>
+                    {counts === null
+                      ? <Skeleton className="mt-0.5 h-4 w-8" />
+                      : <span className={cn('mt-0.5 shrink-0 text-xs font-medium tabular-nums',
+                                            n ? 'text-foreground' : 'text-muted-foreground')}>
+                          {n == null ? DASH : fmt(n)}
+                        </span>}
+                  </button>
+                )
+              })}
+            </div>
+          ))}
+        </nav>
+
+        <Card className="min-w-0">
+          <CardHeader>
+            <CardTitle className="flex flex-wrap items-center gap-2 text-balance">
+              {current?.label ?? 'Worklist'}
+              {current && <PriorityMark priority={current.priority} />}
+            </CardTitle>
+            {current && <p className="text-sm text-foreground">{current.next}</p>}
+            <CardDescription>
+              {total == null ? DASH : `${fmt(total)} ${total === 1 ? 'episode' : 'episodes'}`}
+              {capped && ` · the table shows the first ${fmt(ROW_LIMIT)}; export for the full list`}
+              {canExport && ' · exports carry active clients only, because the others cannot be actioned'}
+            </CardDescription>
+            <CardAction><ListChecks className="size-5 text-muted-foreground" aria-hidden /></CardAction>
+          </CardHeader>
+          <CardContent>
+            {rows === null || (loadingRows && !rows.length) ? (
+              <div className="flex flex-col gap-2" aria-busy="true" aria-label="Loading the list">
+                {Array.from({ length: 6 }, (_, i) => <Skeleton key={i} className="h-9 w-full" />)}
+              </div>
+            ) : !rows.length ? (
+              <Empty className="border">
+                <EmptyHeader>
+                  <EmptyMedia variant="icon"><ListChecks /></EmptyMedia>
+                  <EmptyTitle>No one is on this list</EmptyTitle>
+                  <EmptyDescription>Under the current filters, no episode is waiting at this step.</EmptyDescription>
+                </EmptyHeader>
+              </Empty>
+            ) : (
+              <ClientTable key={`${flag}${query}`} rows={rows} loading={loadingRows}
+                           exportPath={`/export${query}`} flag={flag ?? undefined} caption={current?.label} />
+            )}
+          </CardContent>
+        </Card>
+      </div>
+    </div>
+  )
+}

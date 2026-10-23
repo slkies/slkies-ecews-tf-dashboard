@@ -1,0 +1,86 @@
+/*
+ * The merged theme (22 Oct 2026). One file, imported after index.css; delete
+ * its import in main.tsx (and the chart pair in core/palette.ts) to revert.
+ *
+ * Interface - Octet "Financial dashboards" palette:
+ *   #FBFCFC page   #E0E5E9 borders   #B2C9C5 light teal
+ *   #45828B mid teal (focus ring)   #055B65 deep teal (brand)
+ *   #1BD488 vivid green - the dark-mode accent; too pale for thin marks on white.
+ *
+ * Data - LearnUI's palette method: colours evenly spaced in perceived colour
+ * between two endpoints, the brand teal and amber, the long way round the hue
+ * wheel (blue, indigo, purple, magenta, coral). Seven of those tint the KPI
+ * tiles; the female/male chart pair is the ramp's cool and warm ends, snapped
+ * in lightness and chroma until it passes the colour-blindness validator in
+ * both themes (see core/palette.ts).
+ *
+ * Status colours (--good / --warn / --bad) are untouched: they carry meaning.
+ * Dark-mode text stays neutral white and grey (decision 16).
+ *
+ * The light block is scoped to :root:not(.dark). Plain :root has the same
+ * precedence as index.css's .dark and loads later, so it would override the
+ * dark theme's text, borders and ring with the light values.
+ */
+:root:not(.dark) {
+  --background: #fbfcfc;
+  --foreground: oklch(0.19 0.012 220);
+  --card-foreground: oklch(0.19 0.012 220);
+  --popover-foreground: oklch(0.19 0.012 220);
+
+  --primary: #055b65;
+  --primary-foreground: #ffffff;
+  --secondary: oklch(0.965 0.006 210);
+  --secondary-foreground: oklch(0.25 0.02 215);
+  --muted: oklch(0.965 0.006 210);
+  --muted-foreground: oklch(0.5 0.02 220);
+  --accent: oklch(0.955 0.02 195);
+  --accent-foreground: oklch(0.36 0.06 205);
+
+  --border: #e0e5e9;
+  --input: #e0e5e9;
+  --ring: #45828b;
+
+  --chart-1: #055b65;
+  --chart-2: #0073a1;
+  --chart-3: #de6129;
+  --chart-5: oklch(0.5 0.02 220);
+
+  --sidebar: oklch(0.975 0.005 210);
+  --sidebar-foreground: oklch(0.3 0.015 220);
+  --sidebar-primary: #055b65;
+  --sidebar-accent: oklch(0.93 0.03 192);
+  --sidebar-accent-foreground: oklch(0.34 0.06 205);
+  --sidebar-border: #e0e5e9;
+  --sidebar-ring: #45828b;
+
+  --brand-tint: rgb(5 91 101 / 0.12);
+
+  /* Every icon chip takes the Re-suppressed tile's teal (Es, 23 Oct 2026). */
+  --icon: #246f79;
+}
+
+.dark {
+  --background: oklch(0.16 0.01 220);
+  --card: oklch(0.2 0.012 220);
+  --popover: oklch(0.22 0.012 220);
+  --secondary: oklch(0.27 0.014 220);
+  --muted: oklch(0.27 0.014 220);
+  --accent: oklch(0.28 0.03 190);
+
+  --primary: #1bd488;
+  --primary-foreground: oklch(0.2 0.04 165);
+  --ring: oklch(0.62 0.07 200);
+
+  --chart-1: #1bd488;
+  --chart-2: #008cc0;
+  --chart-3: #e06b39;
+
+  --sidebar: oklch(0.18 0.011 220);
+  --sidebar-primary: #1bd488;
+  --sidebar-primary-foreground: oklch(0.2 0.04 165);
+  --sidebar-accent: oklch(0.28 0.035 185);
+
+  --brand-tint: rgb(27 212 136 / 0.14);
+
+  --icon: #6bb2bc;
+}

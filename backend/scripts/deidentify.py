@@ -76,6 +76,8 @@ VAULT_OLD = "PEPID_Datim"      # retained for historical continuity
 VAULT_PEP = "PEPID"            # the bare PEPID, so a facility can map S/N
                                # to their own list without splitting a key
 LEGACY = "S/N_legacy"          # the pre-migration key - see migrate_keys()
+LINKED = "S/N_linked_to"       # one person at two facilities: the S/N kept for
+                               # them - see link_transfers()
 
 
 def norm_key(s: pd.Series) -> pd.Series:
@@ -109,6 +111,65 @@ def build_key(datim: pd.Series, pep: pd.Series) -> pd.Series:
     """
     return (datim.astype("string").str.strip()
             + pep.astype("string").str.strip())
+
+
+# The treatment columns this pipeline and the dashboard read, in the spelling
+# they read them. Kept in step with app/ingest.py EXPECTED_COLS["treatment"].
+TREATMENT_HEADERS = [
+    "pepId", "datimCode",
+    "state", "lga", "facilityName", "sex", "currentAge", "currentArtStatus",
+    "currentRegimenLine", "currentArtRegimen", "artStartDate", "daysOnArt",
+    "dsdModel", "currentViralLoad", "dateofCurrentViralLoad",
+    "dateResultReceivedFacility", "lastDateOfSampleCollection",
+    "maritalStatus", "jobStatus", "educationallevel", "firstCd4", "cd4LfaResult",
+    "currentPregnancyStatus", "whostage", "bmi", "outcomesDate",
+    "pharmacyLastPickupdate", "daysOfArvRefill", "lgaOfResidence",
+    "stateOfResidence",
+]
+
+
+def restore_headers(df: pd.DataFrame, expected: list[str] = TREATMENT_HEADERS) -> pd.DataFrame:
+    """Rename columns back to the spelling downstream code expects.
+
+    The 12 Sep 2026 export changed naming style - pepId -> PepID, datimCode ->
+    Datim_Code, outcomesDate -> Outcomes_Date - and the run stopped on "needs
+    both 'pepId' and 'datimCode'". Matching on letters alone (norm_col) finds
+    them. A name matched by two columns is left alone and reported: guessing
+    between them could put the wrong field under a trusted name.
+    Only column NAMES are logged, never a value.
+    """
+    by_norm: dict[str, list] = {}
+    for c in df.columns:
+        by_norm.setdefault(norm_col(c), []).append(c)
+    renames, ambiguous = {}, []
+    for name in expected:
+        if name in df.columns:
+            continue
+        hits = by_norm.get(norm_col(name), [])
+        if len(hits) == 1:
+            renames[hits[0]] = name
+        elif len(hits) > 1:
+            ambiguous.append(f"{name} ({', '.join(map(str, hits))})")
+    if renames:
+        log.info("treatment headers: %d restored to the expected spelling - %s",
+                 len(renames), ", ".join(f"{a} -> {b}" for a, b in renames.items()))
+    if ambiguous:
+        log.warning("treatment headers: more than one column could be %s - left "
+                    "as they are", "; ".join(ambiguous))
+    return df.rename(columns=renames)
+
+
+def input_files(pattern: str) -> list[Path]:
+    """Files matching an input pattern, without office lock files.
+
+    Excel writes a hidden `~$<name>.xlsx` beside any workbook that is open, and
+    LibreOffice a `.~lock.<name>#`. Both match `*Treatment*.xls*`, and the lock
+    file is always the newest - so with the export open in Excel the run
+    picked the lock file and stopped on "Permission denied" (16 Sep 2026).
+    """
+    p = Path(pattern)
+    return [f for f in p.parent.glob(p.name)
+            if f.is_file() and not f.name.startswith(("~$", ".~lock."))]
 
 
 def is_encrypted(path: Path) -> bool:
@@ -189,8 +250,11 @@ def split_key(pep_datim: str | None, datim_pep: str | None) -> str | None:
     b = (datim_pep or "").strip()
     if not a or not b or len(a) != len(b):
         return None
+    # Compared without case: keys are matched upper-cased everywhere else
+    # (norm_key), so a pair differing only in case is the same pair.
+    au, bu = a.upper(), b.upper()
     for i in range(1, len(a)):
-        if a[i:] + a[:i] == b:
+        if au[i:] + au[:i] == bu:
             return a[:i]
     return None
 
@@ -233,6 +297,8 @@ class Vault:
                 "guess which mapping is right.")
         self.lookup = dict(zip(self.df["_k"], self.df[KEY]))
         self.added: list[dict] = []
+        self.path = path
+        self.links_changed = 0
         # The bare PEPID, so a facility can join S/N straight onto their own
         # list. Both stored orderings are concatenations with no separator, so
         # neither can be split alone - but together they determine the cut.
@@ -252,9 +318,47 @@ class Vault:
                      f"{self.backfilled:,}")
             if unresolved:
                 log.warning("vault: %s row(s) where the two key orderings do "
-                            "not agree, so the PEPID cannot be recovered - "
-                            "left blank rather than guessed", f"{unresolved:,}")
+                            "not agree, so the PEPID cannot be recovered from "
+                            "them - the export is tried next", f"{unresolved:,}")
         log.info("vault: %s existing mappings", f"{len(self.lookup):,}")
+
+    def fill_pepid_from_export(self, datim: pd.Series, pep: pd.Series,
+                               write_report: bool = True) -> None:
+        """Fill a blank bare PEPID from the treatment export itself.
+
+        Where the vault's two stored orderings disagree, the key pair cannot
+        say where the PEPID ends. The export can: it carries the DATIM code and
+        the PEPID as separate columns, so for any client in it the PEPID is
+        simply read. Matched on the current key (DATIM code + PEPID), which is
+        how the client is looked up anyway, so this cannot attach a PEPID to
+        the wrong row. Clients no longer in the export stay blank, and are
+        listed in <vault>-PEPID-BLANK.csv beside the vault - on this machine
+        only, like the ambiguity report - so they can be completed by hand.
+        """
+        if VAULT_PEP not in self.df.columns:
+            return
+        blank = self.df[VAULT_PEP].isna() | \
+            self.df[VAULT_PEP].astype("string").str.strip().eq("")
+        if not blank.any():
+            return
+        by_key = dict(zip(norm_key(build_key(datim, pep)), pep.astype("string").str.strip()))
+        found = self.df.loc[blank, "_k"].map(by_key)
+        self.df.loc[found.dropna().index, VAULT_PEP] = found.dropna()
+        # Counted with the key-pair recoveries, so save() persists them.
+        self.backfilled += int(found.notna().sum())
+        still = self.df[VAULT_PEP].isna() | \
+            self.df[VAULT_PEP].astype("string").str.strip().eq("")
+        log.info("vault: %s blank PEPID(s) filled from the treatment export, "
+                 "%s still blank", f"{int(found.notna().sum()):,}", f"{int(still.sum()):,}")
+        if still.any() and not write_report:
+            log.info("vault: (dry run - the list of the %s still blank is written "
+                     "on a real run)", f"{int(still.sum()):,}")
+        elif still.any():
+            report = self.path.parent / f"{self.path.stem}-PEPID-BLANK.csv"
+            self.df.loc[still].drop(columns=["_k"]).to_csv(report, index=False)
+            log.warning("vault: the %s still blank are listed in %s - these "
+                        "clients are not in this export, so fill their PEPID "
+                        "in the vault by hand", f"{int(still.sum()):,}", report.name)
 
     def resolve(self, datim: pd.Series, pep: pd.Series) -> pd.Series:
         """Existing clients keep their S/N; unseen ones get a new one.
@@ -275,15 +379,46 @@ class Vault:
         # out of the key later.
         pep_of = dict(zip(k[missing],
                           pep.astype("string").str.strip()[missing]))
-        for key in k[missing].dropna().unique():
+        fresh = k[missing].dropna().unique()
+        for key in fresh:
             sn = new_sn()
             self.lookup[key] = sn
             self.added.append({VAULT_NEW: key, VAULT_OLD: rev.get(key),
                                VAULT_PEP: pep_of.get(key), KEY: sn})
-        if len(self.added):
+        if len(fresh):
             out = k.map(self.lookup)
-            log.info("vault: %s new client(s) assigned a key", f"{len(self.added):,}")
+            # This call's count, not the running total: the EAC lists call this
+            # too, and repeating the treatment list's figure read as new clients.
+            log.info("vault: %s new client(s) assigned a key", f"{len(fresh):,}")
         return out
+
+    def links(self) -> dict[str, str]:
+        """S/N -> the S/N kept for the same person, for every stored link."""
+        if LINKED not in self.df.columns:
+            return {}
+        v = self.df[LINKED].astype("string").str.strip()
+        ok = v.notna() & v.ne("")
+        return dict(zip(self.df.loc[ok, KEY].astype("string").str.strip(), v[ok]))
+
+    def set_links(self, new: dict[str, str]) -> None:
+        """Record links in the vault. Only ever adds or updates; a link is
+        removed by clearing the cell by hand, which undoes the merge."""
+        if not new:
+            return
+        if LINKED not in self.df.columns:
+            self.df[LINKED] = None
+        sn = self.df[KEY].astype("string").str.strip()
+        target = sn.map(new)
+        current = self.df[LINKED].astype("string").str.strip()
+        change = target.notna() & (current.isna() | current.ne(target))
+        self.df.loc[change, LINKED] = target[change]
+        n = int(change.sum())
+        for row in self.added:                    # clients keyed this run
+            if row[KEY] in new and row.get(LINKED) != new[row[KEY]]:
+                row[LINKED] = new[row[KEY]]
+                n += 1
+        self.links_changed += n
+        log.info("transfers: %s link(s) new or changed in the vault", f"{n:,}")
 
     def legacy_map(self) -> dict[str, str]:
         """
@@ -345,7 +480,7 @@ class Vault:
         # Backfilling the PEPID is a change worth persisting even on a run that
         # adds no clients - otherwise it would be recomputed every week and
         # never actually reach the file the team opens.
-        if not self.added and not self.backfilled:
+        if not self.added and not self.backfilled and not self.links_changed:
             log.info("vault: unchanged, nothing to write")
             return
         backup_dir.mkdir(parents=True, exist_ok=True)
@@ -429,11 +564,338 @@ def check_key_collisions(df: pd.DataFrame) -> None:
         return
     g = df.dropna(subset=["pepId"]).groupby("pepId")["datimCode"].nunique()
     shared = int((g > 1).sum())
-    if shared:
-        log.warning("%s PEPID(s) appear under more than one DATIM code - the "
-                    "facility code is REQUIRED in the key", f"{shared:,}")
-    else:
+    if not shared:
         log.info("no PEPID appears under two DATIM codes in this export")
+        return
+    log.warning("%s PEPID(s) appear under more than one DATIM code - the "
+                "facility code is REQUIRED in the key", f"{shared:,}")
+
+    # Two very different things produce a shared PEPID, and they call for
+    # different handling: one person seen at two facilities (a transfer, a
+    # re-registration), or two people who were given the same number by two
+    # facilities that number clients independently. Sex and date of birth
+    # separate them well enough to size each. COUNTS ONLY - no value is logged.
+    f = _shared_pepid_frame(df)
+    if f is None:
+        log.info("  (no date of birth or sex column, so shared PEPIDs cannot be "
+                 "split into transfers and different people)")
+        return
+    per, same, differ = _classify_shared(f)
+    log.info("  of these, %s have the same sex and date of birth at every site "
+             "(probably one person at two facilities; %s of them with a "
+             "transfer-in recorded), %s differ in sex or date of birth "
+             "(different people sharing a facility-assigned number), and %s "
+             "cannot be compared because a date of birth or sex is blank",
+             f"{int(same.sum()):,}", f"{int((same & per['ti']).sum()):,}",
+             f"{int(differ.sum()):,}", f"{int((~same & ~differ).sum()):,}")
+
+    # Es's rule for the likely-same-person group (17 Sep 2026): keep the
+    # record with ART status Active; the other should be transferred out or
+    # otherwise inactive. Checked here before anything acts on it.
+    if f["status"].isna().all():
+        log.info("  (no ART status column, so the Active record cannot be checked)")
+        return
+    s = f[f["pep"].isin(per.index[same])]
+    active = s["status"].str.lower().eq("active")
+    n_active = active.groupby(s["pep"]).sum()
+    one, none, many = n_active.eq(1), n_active.eq(0), n_active.gt(1)
+    log.info("  ART status in the %s likely the same person: %s have exactly one "
+             "Active record, %s have none Active, %s have more than one Active",
+             f"{int(same.sum()):,}", f"{int(one.sum()):,}", f"{int(none.sum()):,}",
+             f"{int(many.sum()):,}")
+    in_one = s["pep"].isin(n_active.index[one])
+    others = s.loc[in_one & ~active, "status"].fillna("(blank)").value_counts()
+    log.info("    where one is Active, the other record(s) are: %s",
+             ", ".join(f"{k} {v:,}" for k, v in others.head(8).items()) or "none")
+    act_rows = s[in_one & active]
+    log.info("    and the Active record carries the transfer-in in %s of %s "
+             "(it is the receiving facility)", f"{int(act_rows['ti'].sum()):,}",
+             f"{len(act_rows):,}")
+    if none.any():
+        st = s.loc[s["pep"].isin(n_active.index[none]), "status"].fillna("(blank)").value_counts()
+        log.info("    where none is Active, the records are: %s",
+                 ", ".join(f"{k} {v:,}" for k, v in st.head(8).items()))
+
+
+def _shared_pepid_frame(df: pd.DataFrame) -> pd.DataFrame | None:
+    """Rows whose PEPID appears under more than one DATIM code, reduced to what
+    the shared-PEPID checks compare. Stays in memory; never logged or written."""
+    by = {norm_col(c): c for c in df.columns}
+    dob_c, sex_c = by.get("dob"), by.get("sex")
+    if dob_c is None or sex_c is None or not {"pepId", "datimCode"} <= set(df.columns):
+        return None
+    d = df.dropna(subset=["pepId"])
+    d = d[d.groupby("pepId")["datimCode"].transform("nunique") > 1]
+    ti_c = by.get("datetransferedin") or by.get("datetransferredin")
+    st_c = by.get("currentartstatus")
+    return pd.DataFrame({
+        "pep": d["pepId"],
+        "dob": pd.to_datetime(d[dob_c], errors="coerce").dt.date,
+        "sex": d[sex_c].astype("string").str.strip().str.lower(),
+        "ti": d[ti_c].notna() if ti_c else False,
+        "status": d[st_c].astype("string").str.strip() if st_c
+        else pd.Series(pd.NA, index=d.index, dtype="string"),
+    }, index=d.index)
+
+
+def _classify_shared(f: pd.DataFrame) -> tuple[pd.DataFrame, pd.Series, pd.Series]:
+    """Per shared PEPID: same person (one sex, one date of birth, none blank),
+    different people (more than one of either), or not comparable."""
+    per = f.groupby("pep").agg(dobs=("dob", "nunique"), sexes=("sex", "nunique"),
+                               gaps=("dob", lambda s: bool(s.isna().any())),
+                               sex_gap=("sex", lambda s: bool(s.isna().any())),
+                               ti=("ti", "any"))
+    incomplete = per["gaps"] | per["sex_gap"]
+    same = (~incomplete) & per["dobs"].eq(1) & per["sexes"].eq(1)
+    differ = per["dobs"].gt(1) | per["sexes"].gt(1)
+    return per, same, differ
+
+
+def transfer_footprint(treat: pd.DataFrame, register: pd.DataFrame,
+                       eac_sheets: dict[str, pd.DataFrame]) -> None:
+    """How far the likely-same-person PEPIDs reach into the published data.
+
+    Each facility registration has its own key, so one person seen at two
+    facilities holds two S/Ns. That only matters where both S/Ns - or one in
+    the register and the other in an EAC list - are in the data the dashboard
+    reads: an episode split across two clients, or one person counted twice.
+    Counts only.
+    """
+    f = _shared_pepid_frame(treat)
+    if f is None or KEY not in treat.columns:
+        return
+    per, same, _ = _classify_shared(f)
+    s = f[f["pep"].isin(per.index[same])].assign(
+        sn=treat.loc[f.index, KEY].astype("string"))
+    # Built directly: groupby().agg() with a set-returning function does not
+    # reliably keep the sets.
+    sns = pd.Series({p: set(g.dropna()) for p, g in s.groupby("pep")["sn"]},
+                    dtype=object)
+    reg = set(register[KEY].astype("string")) if KEY in register.columns else set()
+    eac: set = set()
+    for df in eac_sheets.values():
+        if KEY in df.columns:
+            eac |= set(df[KEY].astype("string").dropna())
+    in_reg = sns.map(lambda x: len(x & reg))
+    in_eac = sns.map(lambda x: len(x & eac))
+    split = sns.map(lambda x: bool(x & reg) and bool((x - reg) & eac))
+    log.info("transfers: of %s likely-same-person PEPIDs, %s have an S/N in the "
+             "register (%s with BOTH S/Ns there - counted twice), %s have an S/N "
+             "in an EAC list (%s with both), and %s have the register episode "
+             "under one S/N and EAC under the other (the episode is split)",
+             f"{len(sns):,}", f"{int(in_reg.gt(0).sum()):,}",
+             f"{int(in_reg.gt(1).sum()):,}", f"{int(in_eac.gt(0).sum()):,}",
+             f"{int(in_eac.gt(1).sum()):,}", f"{int(split.sum()):,}")
+
+
+def link_transfers(treat: pd.DataFrame, report: Path | None = None) -> dict[str, str]:
+    """Decide, for one person held under two facility registrations, which S/N
+    is kept. Returns {other S/N: kept S/N}.
+
+    Agreed with Es, 17 Sep 2026, after the counts confirmed the pattern (3,016
+    of 3,524 have exactly one Active record, the other almost always
+    Transferred out; the Active one carries the transfer-in 98% of the time):
+
+      - exactly one record Active   -> keep the Active one
+      - none Active                 -> keep the one with the transfer-in (the
+                                       receiving facility); failing that, the
+                                       latest pharmacy pickup
+      - more than one Active        -> not linked; a conflict for the HI team
+                                       to correct at source, never guessed
+
+    "Same person" means one sex and one date of birth at every site (see
+    _classify_shared). Counts are logged; the conflict list is written only on
+    a real run, beside the vault, like the other vault reports.
+    """
+    f = _shared_pepid_frame(treat)
+    if f is None or KEY not in treat.columns:
+        return {}
+    per, same, _ = _classify_shared(f)
+    by = {norm_col(c): c for c in treat.columns}
+    pick_c = by.get("pharmacylastpickupdate")
+    s = f[f["pep"].isin(per.index[same])].copy()
+    s["sn"] = treat.loc[s.index, KEY].astype("string").str.strip()
+    s["pickup"] = (pd.to_datetime(treat.loc[s.index, pick_c], errors="coerce")
+                   if pick_c else pd.NaT)
+    s["active"] = s["status"].str.lower().eq("active").fillna(False).astype(bool)
+
+    links: dict[str, str] = {}
+    n = {"active": 0, "ti": 0, "pickup": 0, "two_active": 0, "unclear": 0}
+    conflicts = []
+    for _, g in s.dropna(subset=["sn"]).groupby("pep"):
+        if g["sn"].nunique() < 2:
+            continue
+        act = g[g["active"]]
+        if len(act) > 1:
+            n["two_active"] += 1
+            conflicts.append(g.index)
+            continue
+        if len(act) == 1:
+            keep, how = act["sn"].iloc[0], "active"
+        else:
+            ti = g[g["ti"].astype(bool)]
+            if ti["sn"].nunique() == 1:
+                keep, how = ti["sn"].iloc[0], "ti"
+            else:
+                pool = (ti if len(ti) else g).dropna(subset=["pickup"])
+                latest = pool[pool["pickup"].eq(pool["pickup"].max())] if len(pool) else pool
+                if latest["sn"].nunique() != 1:
+                    n["unclear"] += 1
+                    continue
+                keep, how = latest["sn"].iloc[0], "pickup"
+        n[how] += 1
+        for other in set(g["sn"]) - {keep}:
+            links[other] = keep
+
+    log.info("transfers: %s person(s) held under two facility S/Ns are linked - "
+             "%s kept by Active status, %s by transfer-in, %s by latest pickup; "
+             "not linked: %s Active at more than one facility, %s undecidable",
+             f"{n['active'] + n['ti'] + n['pickup']:,}", f"{n['active']:,}",
+             f"{n['ti']:,}", f"{n['pickup']:,}", f"{n['two_active']:,}",
+             f"{n['unclear']:,}")
+    if conflicts and report is not None:
+        idx = [i for ix in conflicts for i in ix]
+        cols = [c for c in ("datimCode", "pepId", "facilityName", "currentArtStatus", KEY)
+                if c in treat.columns]
+        treat.loc[idx, cols].to_csv(report, index=False)
+        log.warning("transfers: the %s Active at more than one facility are listed "
+                    "in %s, for the HI team", f"{n['two_active']:,}", report.name)
+    return links
+
+
+def apply_links(links: dict[str, str], treat: pd.DataFrame, register: pd.DataFrame,
+                eac_sheets: dict[str, pd.DataFrame]) -> pd.DataFrame:
+    """Publish each linked person under the S/N kept for them.
+
+    Register and EAC rows move to the kept S/N, so an unsuppressed result at
+    one facility meets the EAC delivered at the other. The other facility's
+    treatment row is dropped: the dashboard reads one treatment row per S/N,
+    and it must be the record that is current.
+
+    Within an EAC list a person can now have two rows. The dashboard keeps the
+    first per S/N, so the row with the latest session 1 is put first, and on a
+    tie the row that was already under the kept S/N. Nothing is deleted from
+    the EAC lists. Returns the treatment frame; the others change in place.
+    """
+    if not links:
+        return treat
+
+    def moved(frame: pd.DataFrame) -> pd.Series:
+        sn = frame[KEY].astype("string").str.strip()
+        hit = sn.isin(links)
+        frame.loc[hit, KEY] = sn[hit].map(links)
+        return hit
+
+    reg_n = int(moved(register).sum()) if KEY in register.columns and len(register) else 0
+    eac_n = 0
+    for name, df in list(eac_sheets.items()):
+        if KEY not in df.columns or df.empty:
+            continue
+        hit = moved(df)
+        if not hit.any():
+            continue
+        eac_n += int(hit.sum())
+        s1 = next((c for c in df.columns if norm_col(c) == "session1date"), None)
+        order = pd.DataFrame({
+            "sn": df[KEY].astype("string"),
+            "s1": pd.to_datetime(df[s1], errors="coerce") if s1 else pd.NaT,
+            "moved": hit.astype(int),
+        }, index=df.index)
+        dup = order["sn"].duplicated(keep=False)
+        # Only people with two rows are reordered; everyone else keeps their place.
+        pos = pd.Series(range(len(df)), index=df.index, dtype="float")
+        grp = order[dup].sort_values(["sn", "s1", "moved"], ascending=[True, False, True],
+                                     na_position="last")
+        first_pos = pos[dup].groupby(order.loc[dup, "sn"]).transform("min")
+        pos.loc[grp.index] = first_pos.loc[grp.index] + \
+            grp.groupby("sn").cumcount().to_numpy() / 1000
+        eac_sheets[name] = df.loc[pos.sort_values(kind="mergesort").index] \
+            .reset_index(drop=True)
+
+    gone = treat[KEY].astype("string").str.strip().isin(links)
+    log.info("transfers: published under the kept S/N - %s register row(s), %s EAC "
+             "row(s) moved; %s superseded treatment row(s) dropped",
+             f"{reg_n:,}", f"{eac_n:,}", f"{int(gone.sum()):,}")
+    return treat[~gone]
+
+
+def _loose(k: str) -> str:
+    """A key with punctuation dropped and leading zeros taken off each number:
+    'ABC-0042' and 'ABC42' come out the same. Used only to ask whether a "new"
+    key is really an existing one written differently - never to assign one."""
+    s = re.sub(r"[^A-Z0-9]", "", str(k).upper())
+    return re.sub(r"(?<![0-9])0+(?=[0-9])", "", s)
+
+
+def explain_new_clients(treat: pd.DataFrame, new_keys: set[str], known: set[str],
+                        lookup: dict[str, str] | None = None,
+                        report: Path | None = None) -> None:
+    """Say what kind of rows were just issued a key. COUNTS AND SHAPES ONLY.
+
+    A normal week issues about a hundred, nearly all recent enrolments. A large
+    batch is either a genuine change in what the export covers, or existing
+    clients whose PEPID or facility code is now written differently - which
+    would give them a second S/N and cut them off from their history. The two
+    leave different traces, and this prints the traces.
+    """
+    if not new_keys or not {"pepId", "datimCode"} <= set(treat.columns):
+        return
+    k = norm_key(build_key(treat["datimCode"], treat["pepId"]))
+    new = treat[k.isin(new_keys)]
+    old = treat[k.notna() & ~k.isin(new_keys)]
+    log.info("new clients: %s row(s) under %s new key(s)", f"{len(new):,}", f"{len(new_keys):,}")
+
+    # 1. Would a looser reading of the key have found them in the vault?
+    loose_known: dict[str, str] = {}
+    for x in known:
+        loose_known.setdefault(_loose(x), x)
+    pairs = [(x, loose_known[_loose(x)]) for x in sorted(new_keys) if _loose(x) in loose_known]
+    near = len(pairs)
+    # A handful is a few records typed differently; a share of the batch is a
+    # change in how the export writes keys. Only the second stops a run.
+    wholesale = near > max(10, len(new_keys) * 0.05)
+    if not near:
+        log.info("  0 of the new keys match an existing client once punctuation and "
+                 "leading zeros are ignored (none: not a formatting change)")
+    elif wholesale:
+        log.warning("  %s of %s new keys match an existing client once punctuation and "
+                    "leading zeros are ignored - the export has changed how it writes "
+                    "keys; do NOT run -Go", f"{near:,}", f"{len(new_keys):,}")
+    else:
+        log.warning("  %s new key(s) match an existing client once punctuation and "
+                    "leading zeros are ignored - a few records typed differently, not a "
+                    "format change; safe to run. %s", f"{near:,}",
+                    f"Listed in {report.name} to check by hand." if report
+                    else "They are listed beside the vault on a real run.")
+        if report is not None:
+            pd.DataFrame([{"new key": a, "existing key": b,
+                           "existing S/N": (lookup or {}).get(b)} for a, b in pairs]) \
+                .to_csv(report, index=False)
+
+    # 2. Do they look like the rest of the export?
+    shp = lambda s: s.dropna().astype(str).map(code_shape).value_counts(normalize=True).head(2)
+    fmt_sh = lambda v: ", ".join(f"{a} {b:.0%}" for a, b in v.items()) or "none"
+    log.info("  PEPID shape - new: %s | existing: %s", fmt_sh(shp(new["pepId"])), fmt_sh(shp(old["pepId"])))
+
+    # 3. When did they start ART? New enrolments started recently.
+    by = {norm_col(c): c for c in treat.columns}
+    if by.get("artstartdate"):
+        y = pd.to_datetime(new[by["artstartdate"]], errors="coerce").dt.year
+        bands = {"2026": (y == 2026).sum(), "2025": (y == 2025).sum(),
+                 "2020-2024": y.between(2020, 2024).sum(), "before 2020": (y < 2020).sum(),
+                 "no date": y.isna().sum()}
+        log.info("  ART start year: %s", ", ".join(f"{a} {int(b):,}" for a, b in bands.items()))
+    if by.get("currentartstatus"):
+        st = new[by["currentartstatus"]].astype("string").str.strip().fillna("(blank)").value_counts().head(5)
+        log.info("  ART status: %s", ", ".join(f"{a} {b:,}" for a, b in st.items()))
+
+    # 4. Spread across facilities. A batch concentrated in a few facilities
+    # points at those facilities' records, not at enrolment.
+    per = new["datimCode"].value_counts()
+    if len(per):
+        log.info("  spread: %s facility code(s); the largest holds %.0f%% of the new rows, "
+                 "the top 3 hold %.0f%%", f"{len(per):,}", per.iloc[0] / len(new) * 100,
+                 per.head(3).sum() / len(new) * 100)
 
 
 def code_shape(v: object) -> str:
@@ -503,7 +965,7 @@ def check_key_format(treat: pd.DataFrame, known: set[str]) -> None:
 # ── register: newly unsuppressed clients ──────────────────────────────
 def append_new_unsuppressed(register: pd.DataFrame, treat: pd.DataFrame,
                             vl_threshold: int = 1000,
-                            include_late: bool = False) -> tuple[pd.DataFrame, int]:
+                            include_late: bool = True) -> tuple[pd.DataFrame, int]:
     """
     Add active clients whose viral load came back at or above the threshold
     AFTER the register's current coverage date.
@@ -541,9 +1003,10 @@ def append_new_unsuppressed(register: pd.DataFrame, treat: pd.DataFrame,
     log.info("register covers results received up to %s",
              watermark.date() if pd.notna(watermark) else "(empty register)")
 
-    # Normally only results received after the register's cut-off. With
-    # --include-late, everything unsuppressed is considered and the episode
-    # key alone decides what is new, which sweeps up late-reported results.
+    # Late-reported results are included by default (agreed 17 Sep 2026):
+    # everything unsuppressed is considered, and what is already in the
+    # register - by episode, and by client and result date - decides what is
+    # new. --exclude-late restores the old cut-off-only behaviour.
     if include_late or pd.isna(watermark):
         fresh = got.notna()
     else:
@@ -603,22 +1066,41 @@ def append_new_unsuppressed(register: pd.DataFrame, treat: pd.DataFrame,
         stale = treat[unsuppressed & got.notna() & (got <= watermark)]
         missed = int((~episode(stale).isin(have)).sum()) if len(stale) else 0
         if missed and include_late:
-            # Telling someone to pass a flag they have already passed reads as
-            # though it was ignored. With the flag on these ARE being added.
             log.info("%s late-reported result(s) dated on or before the "
-                     "cut-off are being included (--include-late)",
-                     f"{missed:,}")
+                     "cut-off are absent from the register, and are candidates "
+                     "to add (checked for duplicates below)", f"{missed:,}")
         elif missed:
             log.warning("%s unsuppressed result(s) dated on or before the "
                         "cut-off are absent from the register - late facility "
-                        "reporting. Outside the agreed cut-off, so NOT "
-                        "appended; use --include-late to add them.",
+                        "reporting. NOT appended (--exclude-late).",
                         f"{missed:,}")
 
     if cand.empty:
         return register, 0
 
+    before = len(cand)
     cand = cand[~episode(cand).isin(have)]
+    # A second, looser guard. The episode key includes the VALUE, so a result
+    # already in the register whose value was later corrected at the facility
+    # would read as a new episode and be added twice. Same client, same result
+    # date is the same test, whatever the value now says.
+    if len(register) and len(cand):
+        def client_day(d: pd.DataFrame) -> pd.Series:
+            return (d[KEY].astype(str) + "|"
+                    + pd.to_datetime(col_ci(d, "dateofCurrentViralLoad"), errors="coerce")
+                    .dt.strftime("%Y-%m-%d").fillna("NA"))
+        seen = set(client_day(register))
+        dup = client_day(cand).isin(seen) & ~client_day(cand).str.endswith("|NA")
+        if dup.any():
+            log.info("%s candidate(s) share client and result date with a "
+                     "register row (a corrected value, not a new test) - not "
+                     "appended", f"{int(dup.sum()):,}")
+        cand = cand[~dup]
+    late_added = int((pd.to_datetime(col_ci(cand, date_col), errors="coerce")
+                      <= watermark).sum()) if pd.notna(watermark) and len(cand) else 0
+    log.info("register: %s candidate(s), %s already present, %s new "
+             "(%s of them late-reported)", f"{before:,}",
+             f"{before - len(cand):,}", f"{len(cand):,}", f"{late_added:,}")
     if cand.empty:
         return register, 0
 
@@ -700,10 +1182,13 @@ def main() -> int:
     ap.add_argument("--config", required=True, type=Path)
     ap.add_argument("--dry-run", action="store_true",
                     help="report what would happen; write nothing, upload nothing")
+    ap.add_argument("--exclude-late", action="store_true",
+                    help="do NOT append unsuppressed results dated on or before "
+                         "the register's cut-off. Late-reported results are "
+                         "included by default, checked against the register "
+                         "so nothing is added twice.")
     ap.add_argument("--include-late", action="store_true",
-                    help="also append unsuppressed results dated on or before "
-                         "the register's cut-off that are missing from it - "
-                         "late facility reporting")
+                    help="accepted for older scripts; this is now the default")
     ap.add_argument("--migrate-keys", action="store_true",
                     help="ONE TIME: issue every existing client a new secure key. "
                          "The old key is kept in S/N_legacy, which is then required "
@@ -736,7 +1221,7 @@ def main() -> int:
     # nothing to edit. The chosen file is always logged.
     tpath = Path(P["treatment"])
     if any(ch in P["treatment"] for ch in "*?["):
-        found = sorted(tpath.parent.glob(tpath.name),
+        found = sorted(input_files(P["treatment"]),
                        key=lambda p: p.stat().st_mtime, reverse=True)
         if not found:
             raise SystemExit(f"no treatment export matched {P['treatment']}")
@@ -759,6 +1244,7 @@ def main() -> int:
 
     treat = read_excel_any(tpath, S.get("treatment_password"), dtype=str)
     log.info("treatment list: %s rows x %d cols", f"{len(treat):,}", len(treat.columns))
+    treat = restore_headers(treat)
     check_key_collisions(treat)
 
     if not {"pepId", "datimCode"} <= set(treat.columns):
@@ -792,13 +1278,21 @@ def main() -> int:
             log.warning("%s row(s) where the export's %s differs from "
                         "datimCode+pepId - using the value we built",
                         f"{mismatch:,}", VAULT_NEW)
+    known_before, added_before = set(vault.lookup), len(vault.added)
     treat[KEY] = vault.resolve(treat["datimCode"], treat["pepId"])
+    explain_new_clients(
+        treat, {r[VAULT_NEW] for r in vault.added[added_before:]}, known_before,
+        lookup=vault.lookup,
+        report=None if a.dry_run else
+        Path(P["vault"]).parent / f"{Path(P['vault']).stem}-NEAR-MATCH.csv")
+    vault.fill_pepid_from_export(treat["datimCode"], treat["pepId"],
+                                 write_report=not a.dry_run)
 
     # The EAC list is not cumulative - clients drop out once a cycle closes -
     # so the dashboard unions every sheet it is given and the pipeline has to
     # carry them all forward, not just the newest. `eac` may therefore be a
     # single file or a glob.
-    eac_paths = sorted(Path(P["eac"]).parent.glob(Path(P["eac"]).name)) \
+    eac_paths = sorted(input_files(P["eac"])) \
         if any(ch in P["eac"] for ch in "*?[") else [Path(P["eac"])]
     if not eac_paths:
         raise SystemExit(f"no EAC list matched {P['eac']}")
@@ -890,8 +1384,17 @@ def main() -> int:
                             "current nor the legacy mapping - these clients "
                             "cannot be linked and need investigating",
                             label, f"{int(stale.sum()):,}")
+    # One person at two facilities: measure the split, decide which S/N is
+    # kept, record the link, then publish under it. Before the register append,
+    # so new episodes are checked for duplicates under the kept S/N.
+    transfer_footprint(treat, register, eac_sheets)
+    vault.set_links(link_transfers(
+        treat, report=None if a.dry_run else
+        Path(P["vault"]).parent / f"{Path(P['vault']).stem}-TWO-ACTIVE.csv"))
+    treat = apply_links(vault.links(), treat, register, eac_sheets)
+
     register, added = append_new_unsuppressed(register, treat,
-                                             include_late=a.include_late)
+                                             include_late=not a.exclude_late)
     log.info("register: %s newly unsuppressed episode(s) appended, %s total",
              f"{added:,}", f"{len(register):,}")
 

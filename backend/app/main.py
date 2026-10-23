@@ -30,7 +30,7 @@ from fastapi.responses import StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from psycopg.rows import dict_row
 from psycopg_pool import ConnectionPool
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from . import indicators as ind
 from .ingest import COHORT_COLS, cohort_records, ingest_workbook
@@ -49,18 +49,23 @@ async def lifespan(app: FastAPI):
                           kwargs={"row_factory": dict_row})
     with pool.connection() as c:
         c.execute((Path(__file__).parent / "schema.sql").read_text())
-        # seed each account only if absent, so both survive an existing DB
+        # Seed each account only if absent, so both survive an existing DB, and
+        # only when its password is set in the environment: there is no default
+        # password in the code, so an unset one means no account, not a guessable one.
         def _seed(username, email, name, role, pw):
+            if not pw:
+                log.warning("No password set for the %s account; not created.", username)
+                return
             if not c.execute("SELECT 1 FROM users WHERE email=%s", (email,)).fetchone():
                 c.execute("INSERT INTO users (username,email,password_hash,"
                           "full_name,role) VALUES (%s,%s,%s,%s,%s)",
                           (username, email, hash_password(pw), name, role))
                 log.warning("Seeded %s (%s) - change this password.", username, role)
         _seed("admin", "admin@ecews.org", "Administrator", "admin",
-              os.getenv("ADMIN_PASSWORD", "changeme"))
+              os.getenv("ADMIN_PASSWORD"))
         # a shared read-only account so others can log in and test immediately
         _seed("viewer", "viewer@ecews.org", "Viewer", "viewer",
-              os.getenv("VIEWER_PASSWORD", "viewer1234"))
+              os.getenv("VIEWER_PASSWORD"))
     yield
     pool.close()
 
@@ -397,10 +402,14 @@ def _load(u: dict, f: Filters, upload_id: int | None = None) -> pd.DataFrame:
     for b in ("eac1", "eac2", "eac3", "eac_extended", "eac_completed", "post_sample",
               "post_result", "resuppressed", "undetectable", "llv", "eac_valid",
               "still_unsuppressed", "switched", "eac_prior_cycle", "eac_truncated",
-              "dtc_review", "paed"):
+              "dtc_review", "paed",
+              # worklist flags read straight from the cohort; missing from this
+              # list, a NULL in any of them made that worklist fail outright
+              "post_eac_vl", "awaiting_switch", "prior_switch",
+              "eac_trunc_pre", "eac_trunc_mid"):
         if b in df:
             df[b] = df[b].fillna(False).astype(bool)
-    for d in ("idx_date", "fu_date"):
+    for d in ("idx_date", "fu_date", "fu_samp"):
         if d in df:
             df[d] = pd.to_datetime(df[d], errors="coerce")
     for n in ("idx_vl", "fu_vl", "age", "months_unsuppressed", "time_to_eac",
@@ -543,15 +552,19 @@ def summary(u: U, f: F):
         return {"n": 0, "as_of": up["as_of"], "warnings": up["warnings"]}
     n, r = len(df), int(df["post_result"].sum())
     resupp = int(df["resuppressed"].sum())
+    base = ~ind.left_care_untested(df)
+    nb = int(base.sum())
+    e1 = int((df["eac1"] & base).sum())
     return {
         "n": n, "clients": int(df["sn"].nunique()),
+        "in_care": nb, "left_care_untested": n - nb,
         "as_of": up["as_of"], "filename": up["filename"],
         "warnings": up["warnings"],
-        "eac1": int(df["eac1"].sum()),
-        "eac1_pct": round(int(df["eac1"].sum()) / n * 100, 1),
-        "eac_completed": int(df["eac_completed"].sum()),
+        "eac1": e1,
+        "eac1_pct": round(e1 / nb * 100, 1) if nb else None,
+        "eac_completed": int((df["eac_completed"] & base).sum()),
         "post_result": r,
-        "post_result_pct": round(r / n * 100, 1),
+        "post_result_pct": round(r / nb * 100, 1) if nb else None,
         "resuppressed": resupp,
         "resupp_pct": round(resupp / r * 100, 1) if r else None,
         "still_unsuppressed": int(df["still_unsuppressed"].sum()),
@@ -578,7 +591,11 @@ def get_times(u: U, f: F):
 @app.get("/api/survival")
 def get_survival(u: U, f: F):
     df = _load(u, f)
-    return ind.kaplan_meier(df) if not df.empty else []
+    if df.empty:
+        return []
+    with pool.connection() as c:
+        up = c.execute("SELECT as_of FROM uploads WHERE is_current").fetchone()
+    return ind.kaplan_meier(df, as_of=up["as_of"] if up else None)
 
 
 DIMS = {"state", "lga", "lga_res_norm", "facility", "sex", "age_band", "regimen_line",
@@ -598,24 +615,31 @@ def get_plans(u: U, f: F):
     df = _load(u, f)
     if df.empty:
         return []
-    vc = df["treatment_plan"].value_counts()
-    return [{"plan": k, "n": int(v), "pct": round(v / len(df) * 100, 1)}
-            for k, v in vc.items()]
+    # Split by sex, as every bar on the dashboard is.
+    return [{"plan": r.pop("level"), **r}
+            for r in ind._dist(df["treatment_plan"], sex=ind._col(df, "sex"))]
 
 
 # Deep-dive flags (spec §3) - each one is a facility worklist.
+# Gap worklists leave out clients who left care before a repeat VL: that is
+# not a gap a team can close, and they have their own list (exited_no_vl).
+# Same rule as the cascade and the Overview rates, so a list's count is the
+# gap shown beside it (indicators.left_care_untested, 22 Oct 2026).
+def _in_care(d):
+    return ~ind.left_care_untested(d)
+
+
 FLAGS = {
-    "no_eac": lambda d: ~d["eac1"],
-    "eac_incomplete": lambda d: d["eac1"] & ~d["eac_completed"],
+    "no_eac": lambda d: ~d["eac1"] & _in_care(d),
+    "eac_incomplete": lambda d: d["eac1"] & ~d["eac_completed"] & _in_care(d),
     # the new gap (team review): completed the course >=30 days ago but no VL
     # sample has been collected on/after session 3
-    "awaiting_vl": lambda d: d["eac_completed"] & ~d["post_eac_vl"],
+    "awaiting_vl": lambda d: d["eac_completed"] & ~d["post_eac_vl"] & _in_care(d),
     "awaiting_switch": lambda d: d["awaiting_switch"],
     "prior_switch": lambda d: d["prior_switch"],
     # left care (LTFU/died/IIT/stopped/transferred out) and never retested
-    "exited_no_vl": lambda d: ind.care_status(d).isin(ind._NEG_OUTCOMES)
-                              & ~d["post_result"].fillna(False).astype(bool),
-    "long_unsuppressed": lambda d: d["months_unsuppressed"] > 6,
+    "exited_no_vl": lambda d: ind.left_care_untested(d),
+    "long_unsuppressed": lambda d: (d["months_unsuppressed"] > 6) & _in_care(d),
     # Still in care, unsuppressed for over a year, and never retested. Distinct
     # from long_unsuppressed, which counts anyone past six months whether or not
     # a repeat has since come back, and from exited_no_vl, which is about people
@@ -625,7 +649,7 @@ FLAGS = {
         d["art_status"].astype("string").str.strip().str.casefold().eq("active")
         & (d["months_unsuppressed"] > 12)
         & ~d["post_result"].fillna(False).astype(bool)),
-    "dtc_review": lambda d: d["dtc_review"],
+    "dtc_review": lambda d: d["dtc_review"] & _in_care(d),
     # two separate truncation cohorts - see indicators.build_cohort
     "trunc_pre": lambda d: d["eac_trunc_pre"],
     "trunc_mid": lambda d: d["eac_trunc_mid"],
@@ -633,7 +657,7 @@ FLAGS = {
 }
 CLIENT_COLS = ["sn", "state", "lga", "facility", "sex", "age", "art_status",
                "idx_vl", "recv_date", "idx_samp", "idx_date",
-               "sessions", "eac_completed", "fu_vl",
+               "sessions", "eac_completed", "fu_vl", "fu_samp", "fu_date",
                "still_unsuppressed", "switched", "months_unsuppressed",
                "treatment_plan"]
 
@@ -665,6 +689,8 @@ EXPORT_HEADERS = {
     "sessions": "EAC sessions",
     "eac_completed": "EAC completed",
     "fu_vl": "Follow-up VL (copies/mL)",
+    "fu_samp": "Follow-up VL sample collected",
+    "fu_date": "Follow-up VL received at facility",
     "still_unsuppressed": "Still unsuppressed",
     "switched": "Switched regimen",
     "months_unsuppressed": "Months unsuppressed",
@@ -677,6 +703,14 @@ def _json_safe(df: pd.DataFrame) -> list[dict]:
     return df.astype(object).where(pd.notna(df), None).to_dict("records")
 
 
+def _flag_mask(df: pd.DataFrame, flag: str) -> pd.Series:
+    """Which rows a worklist holds. A rule over a nullable column yields NA for
+    a missing value; NA is "not on the list", not an error. The counts and the
+    list share this, so the number beside a list is the number in it."""
+    return (pd.Series(FLAGS[flag](df), index=df.index)
+            .astype("boolean").fillna(False).astype(bool))
+
+
 def _clients(u: dict, f: Filters, flag: str | None, limit: int,
              active_only: bool = False) -> pd.DataFrame:
     df = _load(u, f)
@@ -685,7 +719,7 @@ def _clients(u: dict, f: Filters, flag: str | None, limit: int,
     if flag:
         if flag not in FLAGS:
             raise HTTPException(400, f"Unknown flag. Try: {', '.join(FLAGS)}")
-        df = df[FLAGS[flag](df)]
+        df = df[_flag_mask(df, flag)]
     if active_only and "art_status" in df.columns:
         # Only clients a team can actually act on. Half the treatment list is
         # not: 18% LTFU, 10% transferred out, 10% discontinued care, 5% died,
@@ -694,7 +728,10 @@ def _clients(u: dict, f: Filters, flag: str | None, limit: int,
         # and every wasted call makes the next list less likely to be worked.
         df = df[df["art_status"].astype("string").str.strip()
                 .str.casefold().eq("active")]
-    return df[CLIENT_COLS].head(limit)
+    # The episode key rides along so a row in a worklist table can be selected
+    # and exported exactly - S/N alone is not unique, a client can fail twice.
+    # It is dropped from the CSV, which keeps its readable headings.
+    return df[["episode", *CLIENT_COLS]].head(limit)
 
 
 def _access_note(f: Filters, flag: str | None, n: int) -> str:
@@ -717,8 +754,28 @@ def get_clients(u: U, f: F, request: Request, flag: str | None = Query(None),
     return [] if df.empty else _json_safe(df)
 
 
-@app.get("/api/export")
-def export_csv(u: U, f: F, request: Request, flag: str | None = Query(None)):
+@app.get("/api/worklists")
+def worklist_counts(u: U, f: F):
+    """How many episodes each worklist holds, under the current filters.
+
+    Counts only: no client row leaves the server here, so this is not an
+    audited access - opening a list (/api/clients) is. The original dashboard
+    fetched up to 5,000 rows per list, ten times over, just to count them.
+    """
+    df = _load(u, f)
+    return [{"flag": key, "n": 0 if df.empty else int(_flag_mask(df, key).sum())}
+            for key in FLAGS]
+
+
+class ExportSelection(BaseModel):
+    """Episodes chosen in a worklist table. Sent as a body rather than a query
+    string, because a few hundred episode keys do not fit in a URL."""
+    flag: str | None = None
+    episodes: list[str] = Field(min_length=1, max_length=5000)
+
+
+def _export(u: dict, f: Filters, request: Request, flag: str | None,
+            episodes: list[str] | None = None) -> StreamingResponse:
     # Bulk extraction of patient-level records. Restricted to admin/analyst:
     # a scoped viewer reads the dashboard, but pulling the line list out of it
     # is a different act and is logged as such.
@@ -735,23 +792,52 @@ def export_csv(u: U, f: F, request: Request, flag: str | None = Query(None)):
     # account of everyone, not a list of who to ring.
     everyone = _clients(u, f, flag, 100_000)
     df = _clients(u, f, flag, 100_000, active_only=True)
+    chosen = ""
+    if episodes is not None:
+        # A selection narrows the same scoped, filtered, active-only list - it
+        # can never reach a row the user could not have exported anyway. A key
+        # that matches nothing (outside scope, another snapshot, stale) is not
+        # an error, but it is recorded.
+        wanted = set(episodes)
+        everyone = everyone[everyone["episode"].isin(wanted)]
+        df = df[df["episode"].isin(wanted)]
+        chosen = f"; selection of {len(wanted)}, {len(wanted) - len(everyone)} not found"
     dropped = len(everyone) - len(df)
     _audit("export.csv", user_id=u["id"], email=u["email"], request=request,
            detail=f"{_access_note(f, flag, len(df))}; "
-                  f"{dropped} non-active excluded")
+                  f"{dropped} non-active excluded{chosen}")
     buf = io.StringIO()
-    df.rename(columns=EXPORT_HEADERS).to_csv(buf, index=False)
+    df.drop(columns=["episode"]).rename(columns=EXPORT_HEADERS).to_csv(buf, index=False)
     buf.seek(0)
-    name = f"ecews_tf_{flag or 'cohort'}_active_{dt.date.today()}.csv"
+    part = "selected_active" if episodes is not None else "active"
+    name = f"ecews_tf_{flag or 'cohort'}_{part}_{dt.date.today()}.csv"
     return StreamingResponse(
         iter([buf.getvalue()]), media_type="text/csv",
         headers={"Content-Disposition": f'attachment; filename="{name}"'})
 
 
+@app.get("/api/export")
+def export_csv(u: U, f: F, request: Request, flag: str | None = Query(None)):
+    return _export(u, f, request, flag)
+
+
+@app.post("/api/export")
+def export_selected(body: ExportSelection, u: U, f: F, request: Request):
+    return _export(u, f, request, body.flag, body.episodes)
+
+
 @app.get("/api/risk")
-def get_risk(u: U, f: F):
+def get_risk(u: U, f: F, request: Request):
     df = _load(u, f)
-    return ind.resuppression_model(df) if not df.empty else {"ok": False, "reason": "No data."}
+    if df.empty:
+        return {"ok": False, "reason": "No data."}
+    out = ind.resuppression_model(df)
+    # The lowest-chance list is client rows, so reading it is a patient-data
+    # access like opening a worklist, and is recorded the same way.
+    if out.get("lowest_chance"):
+        _audit("clients.view", user_id=u["id"], email=u["email"], request=request,
+               detail=_access_note(f, "risk_lowest_chance", len(out["lowest_chance"])))
+    return out
 
 
 @app.get("/api/mortality")
@@ -882,11 +968,11 @@ class NewPassword(BaseModel):
 
 
 # Minimum length, configurable so ECEWS policy can raise it without a code
-# change. The seeded defaults are refused outright: the whole point of a reset
-# is to stop an account sitting on a password that is printed in this source.
+# change. Common defaults and the .env.example placeholder are refused
+# outright, so no account can sit on a password anyone could guess.
 MIN_PASSWORD = int(os.getenv("MIN_PASSWORD_LENGTH", "10"))
-_BANNED = {"changeme", "viewer1234", "blindalley", "password", "admin",
-           "12345678", "password123"}
+_BANNED = {"changeme", "change-me", "password", "admin", "12345678",
+           "password123"}
 
 
 def _check_password(pw: str) -> None:
@@ -945,6 +1031,39 @@ def toggle_user(uid: int, u: Annotated[dict, Depends(admin)], request: Request):
         raise HTTPException(404, "User not found.")
     _audit("user.toggle", user_id=u["id"], email=u["email"], request=request,
            detail=f"{r['email']} -> {'activated' if r['is_active'] else 'deactivated'}")
+    return {"ok": True}
+
+
+@app.delete("/api/users/{uid}")
+def delete_user(uid: int, u: Annotated[dict, Depends(admin)], request: Request):
+    """
+    Remove an account for good, e.g. staff who have left the project.
+
+    Disabling (PATCH above) is the reversible option and keeps the account; this
+    is for when the account should not exist at all. What the person did is
+    kept: audit rows and feedback carry the email themselves, so their user_id
+    is cleared rather than the rows deleted, and an upload keeps its record with
+    no uploader. Their usage rows go with the account (ON DELETE CASCADE).
+    """
+    if uid == u["id"]:
+        raise HTTPException(400, "You cannot delete your own account. Ask another admin.")
+    with pool.connection() as c:
+        r = c.execute("SELECT username, email, role, is_active FROM users WHERE id=%s",
+                      (uid,)).fetchone()
+        if not r:
+            raise HTTPException(404, "User not found.")
+        if r["role"] == "admin" and r["is_active"]:
+            n = c.execute("SELECT count(*) AS n FROM users WHERE role='admin' "
+                          "AND is_active").fetchone()["n"]
+            if n <= 1:
+                raise HTTPException(400, "That is the only active admin. Promote "
+                                         "someone else first.")
+        c.execute("UPDATE audit_log SET user_id=NULL WHERE user_id=%s", (uid,))
+        c.execute("UPDATE feedback SET user_id=NULL WHERE user_id=%s", (uid,))
+        c.execute("UPDATE uploads SET uploaded_by=NULL WHERE uploaded_by=%s", (uid,))
+        c.execute("DELETE FROM users WHERE id=%s", (uid,))
+    _audit("user.delete", user_id=u["id"], email=u["email"], request=request,
+           detail=f"deleted {r['username'] or r['email']} <{r['email']}> role={r['role']}")
     return {"ok": True}
 
 
@@ -1240,22 +1359,32 @@ def overview(u: U, f: F):
     def rate(a, b):
         return round(a / b * 100, 1) if b else None
 
+    # Every GAP measure below - EAC uptake, completion, retesting - is taken
+    # over `dg`, the episodes still in care or retested. Clients who left care
+    # before a repeat VL are counted (left_care_untested) and have their own
+    # worklist, but are not a gap a team can close. `n` and the descriptive
+    # panels stay the whole cohort (indicators.left_care_untested).
+    gone = ind.left_care_untested(df)
+    dg = df[~gone]
+
     # ── progress by quarter: the maturation story ──────────────────────
     prog = []
     for q in sorted(x for x in df["enrol_quarter"].dropna().unique()):
         d = df[df["enrol_quarter"] == q]
         n = len(d)
-        e1 = int(d["eac1"].sum())
-        dn = int(d["eac_completed"].sum())
-        rs = int(d["post_result"].sum())
-        rr = int(d["resuppressed"].sum())
-        prog.append({"quarter": q, "n": n,
+        dq = dg[dg["enrol_quarter"] == q]
+        nb = len(dq)
+        e1 = int(dq["eac1"].sum())
+        dn = int(dq["eac_completed"].sum())
+        rs = int(dq["post_result"].sum())
+        rr = int(dq["resuppressed"].sum())
+        prog.append({"quarter": q, "n": n, "in_care": nb, "left_care": n - nb,
                      "n_female": int((d["sex"] == "Female").sum()),
                      "n_male": int((d["sex"] == "Male").sum()),
                      "eac1": e1, "completed": dn,
                      "retested": rs, "resuppressed": rr,
-                     "eac1_pct": rate(e1, n), "completed_pct": rate(dn, e1),
-                     "retest_pct": rate(rs, n), "resupp_pct": rate(rr, rs)})
+                     "eac1_pct": rate(e1, nb), "completed_pct": rate(dn, e1),
+                     "retest_pct": rate(rs, nb), "resupp_pct": rate(rr, rs)})
 
     # ── monthly incidence by sex, from Jul 2025 ────────────────────────
     # Monthly (not weekly): weekly was spiky and unreadable. Bucketed on
@@ -1343,7 +1472,7 @@ def overview(u: U, f: F):
     }
 
     # ── per-state summary for the outcome card's state bars ────────────────
-    st_grp = (df[df["state"].notna() & (df["state"] != "Unknown")]
+    st_grp = (dg[dg["state"].notna() & (dg["state"] != "Unknown")]
               .groupby("state")
               .agg(n=("sn", "size"), eac1=("eac1", "sum"),
                    completed=("eac_completed", "sum"),
@@ -1362,7 +1491,7 @@ def overview(u: U, f: F):
     # from one that was 88%, and the bars read identically in both cases.
     # Dated on the index result reaching the facility, the same clock as the
     # quarters and the month filter, so a dip here can be clicked into.
-    up_m = df.dropna(subset=["recv_date"]).copy()
+    up_m = dg.dropna(subset=["recv_date"]).copy()
     up_m["recv_date"] = pd.to_datetime(up_m["recv_date"], errors="coerce")
     up_m["_m"] = up_m["recv_date"].dt.to_period("M").dt.start_time
     mg = (up_m.groupby("_m")
@@ -1398,7 +1527,7 @@ def overview(u: U, f: F):
 
     # ── facility league ───────────────────────────────────────────────
     MIN_VOL = 20   # completion rates on <20 episodes are noise, not signal
-    fac = (df.groupby("facility")
+    fac = (dg.groupby("facility")
              .agg(n=("sn", "size"), eac1=("eac1", "sum"),
                   completed=("eac_completed", "sum"),
                   resupp=("resuppressed", "sum"))
@@ -1417,11 +1546,12 @@ def overview(u: U, f: F):
     # recorded - either way it is the highest-yield thing on this page.
     zero = fac[(fac["n"] >= MIN_VOL) & (fac["eac1"] == 0)].sort_values("n", ascending=False)
 
-    e1 = int(df["eac1"].sum())
-    dn = int(df["eac_completed"].sum())
-    rs = int(df["post_result"].sum())
-    rr = int(df["resuppressed"].sum())
-    still = int(df["still_unsuppressed"].sum())
+    nb = len(dg)
+    e1 = int(dg["eac1"].sum())
+    dn = int(dg["eac_completed"].sum())
+    rs = int(dg["post_result"].sum())
+    rr = int(dg["resuppressed"].sum())
+    still = int(dg["still_unsuppressed"].sum())
     # Switch denominator = still-unsuppressed episodes that were 1st line at the
     # index VL (switchable). Prior-switch (2nd/3rd at index) is a separate group.
     sw_elig = df[df["switch_eligible"].fillna(False).astype(bool)]
@@ -1436,14 +1566,16 @@ def overview(u: U, f: F):
         "repeat_clients": int((df["sn"].value_counts() > 1).sum()),  # clients with >1
         "as_of": up["as_of"],
         "warnings": up["warnings"],
-        "eac1": e1, "eac1_pct": rate(e1, n),
-        "never_eac": n - e1,
+        # The base every gap is measured on, and who was taken out of it.
+        "in_care": nb, "left_care_untested": n - nb,
+        "eac1": e1, "eac1_pct": rate(e1, nb),
+        "never_eac": nb - e1,
         "completed": dn, "completed_pct": rate(dn, e1),
-        "post_eac_vl": int(df["post_eac_vl"].fillna(False).astype(bool).sum()),
+        "post_eac_vl": int(dg["post_eac_vl"].fillna(False).astype(bool).sum()),
         # A follow-up VL is ANY later VL, so it is not conditional on EAC and
         # cannot be reported against the EAC denominator (that gave >100%).
-        "retested": rs, "retest_pct": rate(rs, n),
-        "awaiting_retest": n - rs,
+        "retested": rs, "retest_pct": rate(rs, nb),
+        "awaiting_retest": nb - rs,
         "resuppressed": rr, "resupp_pct": rate(rr, rs),
         "still_unsuppressed": still,
         "switch_eligible": len(sw_elig),
@@ -1625,5 +1757,19 @@ def version():
 
 
 _static = Path(__file__).parent.parent / "static"
+
+# The React rewrite, served alongside the app it will eventually replace. The
+# live dashboard is in weekly use by state teams and does not come down for a
+# migration, so the two run side by side: the existing single-file app at /,
+# the React build at /app, sharing this API, these fonts and this brand
+# directory. When the React app reaches parity the mounts swap.
+#
+# Mounted BEFORE "/" because mount order is match order - a StaticFiles at "/"
+# would swallow /app and serve it the old index.html.
+_static_app = Path(__file__).parent.parent / "static_app"
+if _static_app.exists():
+    app.mount("/app", StaticFiles(directory=_static_app, html=True),
+              name="static_app")
+
 if _static.exists():
     app.mount("/", StaticFiles(directory=_static, html=True), name="static")

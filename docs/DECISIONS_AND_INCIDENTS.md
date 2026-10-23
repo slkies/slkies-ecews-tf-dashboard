@@ -231,3 +231,189 @@ The refusal message is in the runbook's troubleshooting table.
 
 **Lesson.** A dangerous command sitting in a document is a dangerous command. The
 defence that worked was the one in the code, not the one in the prose.
+
+## 12. The filter popups could not be tested in jsdom
+**13 Sep 2026** — Rebuilding the filter bar on shadcn's Base UI combobox, three
+tests timed out. A probe showed that a single click on a filter's button never
+returned inside jsdom, and shadcn's own unmodified combobox crashed the test
+worker the same way. jsdom does not implement the layout and pointer behaviour
+Base UI's popups rely on. It is not a fault in the app: in a real browser the
+same filter opens, groups facilities by state, and applies a selection.
+
+**What changed.** Selection is tested through the filter context, which is the
+same path a popup choice takes, and the popups themselves are checked in a real
+browser. Two development-only pages exist for that, served by `npm run dev` and
+never part of the production build: `/app/harness.html` (the filter bar alone)
+and `/app/harness-overview.html` (the whole frame and Overview with illustrative
+figures, `?theme=dark` for the dark palette). The limitation is written at the
+top of `filter-bar.test.tsx` so nobody re-adds the popup tests expecting them to pass.
+
+**Lesson.** A component library's interactive layer can outrun the test
+environment. When it does, test the logic where it can be tested, check the
+interaction where it actually runs, and say which is which.
+
+## 13. A worklist with a blank flag value failed to open
+**13 Sep 2026** — Writing a test that the new worklist counts match the lists
+themselves, the list request failed for a flag whose column held an empty
+value. Five columns the worklists read directly (`post_eac_vl`,
+`awaiting_switch`, `prior_switch`, `eac_trunc_pre`, `eac_trunc_mid`) were missing
+from the list that turns database NULLs into False. When any row had a NULL in
+one of them, that whole worklist returned an error instead of its clients.
+
+**What changed.** The five columns are coerced with the others, and the counts
+and the list now share one function (`_flag_mask`), which treats a missing value
+as "not on this list". The number beside a worklist is, by construction, the
+number of rows in it.
+
+**Lesson.** A count and the list it describes must come from the same code, or
+they will drift apart - and a test that compares them finds more than drift.
+
+## 14. Exporting chosen rows stays a server export
+**13 Sep 2026** — The worklists table lets a team select rows. The quick way to
+export them would be to build the CSV in the browser from rows already on
+screen. That would skip the role check, the scope, the active-clients rule and
+the audit record. Instead `POST /api/export` takes the chosen episode keys and
+narrows the same scoped, filtered, active-only list the full export uses, so a
+selection can never reach a row its user could not already export. The audit
+entry records the size of the selection and how many keys matched nothing.
+Episode keys (`S/N|index date`), not S/N, identify rows, because one client can
+fail more than once.
+
+## 15. Dark mode text carries no colour
+**15 Sep 2026** — Es noticed dark mode read green. The Option 1 palette warms its
+neutrals toward olive; at a light page's contrast that is invisible, but white
+text on a dark ground showed it, and the brighter dark-mode green was also used
+for link text and the active menu item. Dark mode text is now neutral: white for
+body and headings, mid-grey for secondary text, no hue in either. Green stays
+for filled buttons, badges, bars and chart accents, never text. Status colours
+(red for still unsuppressed, amber for warnings) are unchanged, because they
+carry meaning and always sit beside a label.
+
+## 16. The dry run picked Excel's lock file
+**16 Sep 2026** — The dry run stopped with "Permission denied" on a file named
+`~$ECEWS_Treatment Linelist_12th September 2026.xlsx`. Excel creates that hidden
+lock file beside any workbook that is open. It matched the treatment pattern, and
+being the newest match it was chosen over the real export. Nothing was written.
+
+**What changed.** `input_files()` in `deidentify.py` finds inputs for both the
+treatment export and the EAC lists, and skips Excel (`~$`) and LibreOffice
+(`.~lock.`) lock files. Checked against synthetic empty files: the newest real
+export is chosen and lock files are never candidates.
+
+**Lesson.** A pattern that says "newest file" must say what counts as a file.
+
+## 17. The 12 September export renamed its columns
+**16 Sep 2026** — The dry run stopped with "treatment list needs both 'pepId'
+and 'datimCode'". A header-only inspection (`inspect_export.py`, no cell values)
+showed the export had changed naming style: `PepID`, `Datim_Code`,
+`Outcomes_Date`, `Current_Age`, `LGA_of_Residence` and more. Identifier
+removal was never at risk, because it already matched on letters alone. The
+dashboard was: it matched treatment columns case-insensitively but not across
+underscores, so age, exit dating, pickup dates, DSD model, CD4 LFA and the
+residence map would have read "not recorded" for every client, silently.
+
+**What changed.**
+- `deidentify.py` restores the 30 expected treatment headers straight after
+  reading (`restore_headers`), matching on letters and digits and logging each
+  rename by name. A name two columns could match is left alone and reported.
+- The dashboard's resolver and the upload audit match the same way
+  (`indicators.col_key`), so an upload that skipped the pipeline is still read.
+- `inspect_export.py` skips Excel lock files, as the pipeline now does.
+
+The 17 Sep dry run restored all 30 headers and passed validation.
+
+**Lesson.** Tolerating one kind of drift (case) invites the next (punctuation).
+Match on the letters, and say out loud what was renamed.
+
+## 18. Late results included by default; blank PEPIDs; shared PEPIDs sized
+**17 Sep 2026** — Three changes to `deidentify.py`, agreed with Es.
+
+**Late-reported results are appended by default.** An unsuppressed result dated
+on or before the register's cut-off, reported late by a facility, used to need
+`--include-late`. It is now the default (`--exclude-late` restores the old
+behaviour). Two guards stop duplication: an episode already in the register
+(S/N, result date, value) is never added, and neither is a result sharing a
+client and result date with a register row, which catches a value corrected at
+the facility after it was first registered. The run logs candidates, how many
+were already present, and how many new rows were late-reported.
+
+**Blank PEPIDs in the vault.** The bare PEPID column is recovered by fitting the
+two stored key orderings together. 23 rows' orderings did not fit. The fit now
+ignores case, and any PEPID still blank is read from the treatment export, matched
+on the client's current key. Anything still blank (clients no longer in the
+export) is listed on a real run in `SN_Key-PEPID-BLANK.csv` beside the vault, on
+Es's machine only, to complete by hand. S/N assignment never depended on this
+column; it is for facilities joining S/N onto their own lists.
+
+**Shared PEPIDs.** The run now splits the PEPIDs found under more than one DATIM
+code into: same sex and date of birth at every site (likely one person at two
+facilities, with the number that have a transfer-in recorded), different sex or
+date of birth (different people given the same facility-assigned number), and
+those that cannot be compared. Counts only.
+
+## 19. One person at two facilities is published under one S/N
+**17 Sep 2026** — The key is facility code + PEPID, so a client who transfers
+gets a second S/N at the receiving facility. Of 5,862 PEPIDs found under more
+than one facility code, 3,524 have one sex and date of birth throughout. In
+those, 3,016 have exactly one Active record, the other almost always
+Transferred out, and 98% of the Active records carry the transfer-in. 19
+unsuppressed episodes had their EAC under the other S/N and read as "no EAC".
+
+**Rule (agreed with Es).** Keep the Active record's S/N. Where none is Active
+(495), keep the record with the transfer-in, or failing that the latest
+pharmacy pickup. Where more than one is Active (13), do not link: that is for
+the HI team to correct, and the list is written beside the vault on a real run
+(`SN_Key-TWO-ACTIVE.csv`). The 2,338 with differing sex or date of birth are
+different people and are never linked.
+
+**How.** The vault records the link in `S/N_linked_to` on the superseded S/N;
+clearing that cell undoes it. On publishing, register and EAC rows move to the
+kept S/N, the superseded treatment row is dropped, and where a person now has
+two rows in one EAC list the one with the latest session 1 is placed first,
+because the dashboard reads the first. Nothing is deleted from the EAC lists.
+
+**Note.** Line list changes compares S/Ns between uploads, so the first upload
+after this shows the linked people's episodes moving to their kept S/N.
+
+## 20. Clients who left care before a repeat VL are not a gap
+**22 Oct 2026** — Facilities followed up cascade gaps ("never commenced EAC",
+"no post-EAC VL") and found the client had left care months before: LTFU, died,
+transferred out, discontinued. Counted as a gap, they sent teams after work no
+one could do, and made the real gaps harder to see.
+
+**Rule (agreed with Es).** An episode whose ART status is a negative outcome
+(LTFU, IIT, stopped, died, transferred out, discontinued care) and that has no
+follow-up VL result is *left care before a repeat VL*
+(`indicators.left_care_untested`). Everywhere a gap is measured, it is measured
+among the rest:
+
+- the cascade shows them as their own grey step under step 1, and every later
+  step uses the base still in care or retested (step 1b);
+- the Overview tiles, quarterly cascade, state and facility tables and monthly
+  EAC uptake, and `/api/summary`, take their rates over that base and publish it
+  as `in_care` beside `left_care_untested`;
+- the gap worklists (no EAC, EAC incomplete, no post-EAC VL, unsuppressed over
+  six months, DTC review) leave them out, so a list's count is the gap beside it;
+- Deep dive's EAC status names them instead of counting them as never commenced.
+
+They stay in the cohort count and in their own worklist, *Left care before a
+repeat VL*. A client who left care **after** a repeat VL stays in the cascade:
+their outcome is known.
+
+## 21. Worklists are ranked by clinical urgency
+**23 Oct 2026** — The needs-action worklists are ordered, on Worklists and in
+Deep dive's actionable flags, most urgent first:
+
+| Rank | Priority | Worklist | Why |
+|---|---|---|---|
+| 1 | High | Still unsuppressed after EAC, awaiting DTC review | a switch decision is overdue |
+| 2 | High | More than 2 EAC cycles, still failing | adherence support has not worked |
+| 3 | High | Active, unsuppressed over a year, never retested | reachable, and nothing done since |
+| 4 | Medium | Completed EAC 30+ days ago, no post-EAC VL | the decision is blocked on a sample |
+| 5 | Medium | Unsuppressed with no valid EAC record | no intervention yet |
+| 6 | Medium | Started EAC but not completed | intervention stalled |
+| 7 | Low | Unsuppressed for more than 6 months | a wide net overlapping the above |
+| 8 | Low | Left care before a repeat VL | tracing, not EAC |
+
+Context and data-check lists are not ranked. The order lives in one place
+(`WORKLISTS` in `worklists-page.tsx`) and is the programme's to change.
