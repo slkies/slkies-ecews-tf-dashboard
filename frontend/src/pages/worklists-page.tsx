@@ -23,15 +23,33 @@ import { DASH, fmt, fmtDate } from '@/core/format'
 import { useSession } from '@/core/session'
 
 /** The worklists the backend defines (FLAGS in main.py), in the order a team works them. */
-export const WORKLISTS: { flag: string; label: string; group: 'Needs action' | 'Context and data checks' }[] = [
-  { flag: 'no_eac', label: 'Unsuppressed with no valid EAC record', group: 'Needs action' },
-  { flag: 'eac_incomplete', label: 'Started EAC but not completed', group: 'Needs action' },
-  { flag: 'awaiting_vl', label: 'Completed EAC 30+ days ago, no post-EAC VL sample', group: 'Needs action' },
-  { flag: 'awaiting_switch', label: 'Still unsuppressed after EAC, awaiting DTC review', group: 'Needs action' },
-  { flag: 'dtc_review', label: 'More than 2 EAC cycles, still failing', group: 'Needs action' },
-  { flag: 'never_retested', label: 'Active, unsuppressed over a year, never retested', group: 'Needs action' },
-  { flag: 'long_unsuppressed', label: 'Unsuppressed for more than 6 months', group: 'Needs action' },
-  { flag: 'exited_no_vl', label: 'Left care before a repeat VL', group: 'Needs action' },
+/**
+ * The worklists the backend defines (FLAGS in main.py). Needs-action lists are
+ * in priority order, most clinically urgent first (agreed 23 Oct 2026):
+ *
+ *   High   - a decision is overdue: failed after EAC and still on 1st line;
+ *            failing through more than two cycles; unsuppressed over a year
+ *            and never retested.
+ *   Medium - the next step has not happened: no post-EAC VL after a completed
+ *            cycle; no EAC at all; EAC started but not completed.
+ *   Low    - wider nets that overlap the lists above (unsuppressed > 6 months),
+ *            and clients who have left care, which is tracing, not EAC.
+ *
+ * Context and data checks are not ranked: they are for correcting records.
+ */
+export type Priority = 'High' | 'Medium' | 'Low'
+export const WORKLISTS: {
+  flag: string; label: string; group: 'Needs action' | 'Context and data checks'
+  rank?: number; priority?: Priority
+}[] = [
+  { flag: 'awaiting_switch', label: 'Still unsuppressed after EAC, awaiting DTC review', group: 'Needs action', rank: 1, priority: 'High' },
+  { flag: 'dtc_review', label: 'More than 2 EAC cycles, still failing', group: 'Needs action', rank: 2, priority: 'High' },
+  { flag: 'never_retested', label: 'Active, unsuppressed over a year, never retested', group: 'Needs action', rank: 3, priority: 'High' },
+  { flag: 'awaiting_vl', label: 'Completed EAC 30+ days ago, no post-EAC VL sample', group: 'Needs action', rank: 4, priority: 'Medium' },
+  { flag: 'no_eac', label: 'Unsuppressed with no valid EAC record', group: 'Needs action', rank: 5, priority: 'Medium' },
+  { flag: 'eac_incomplete', label: 'Started EAC but not completed', group: 'Needs action', rank: 6, priority: 'Medium' },
+  { flag: 'long_unsuppressed', label: 'Unsuppressed for more than 6 months', group: 'Needs action', rank: 7, priority: 'Low' },
+  { flag: 'exited_no_vl', label: 'Left care before a repeat VL', group: 'Needs action', rank: 8, priority: 'Low' },
   { flag: 'prior_switch', label: 'Already switched before the index VL', group: 'Context and data checks' },
   { flag: 'trunc_pre', label: 'Sample taken before EAC session 1', group: 'Context and data checks' },
   { flag: 'trunc_mid', label: 'Sample taken mid-cycle, before session 3', group: 'Context and data checks' },

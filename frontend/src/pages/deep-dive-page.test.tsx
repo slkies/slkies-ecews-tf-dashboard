@@ -112,6 +112,18 @@ describe('Deep dive page', () => {
     expect(onOpenWorklist).toHaveBeenCalledWith('exited_no_vl')
   })
 
+  it('lists the actionable flags most urgent first, and re-sorts on a heading', async () => {
+    mock(P)
+    const { user } = draw()
+    await screen.findByText('900 distinct clients')
+    const flags = section(/Actionable flags/)
+    const first = () => within(flags).getAllByRole('row')[1]!
+    expect(first()).toHaveTextContent('Still unsuppressed after EAC, awaiting DTC review')
+    expect(first()).toHaveTextContent('High')
+    await user.click(within(flags).getByRole('button', { name: 'Episodes' }))
+    expect(first()).toHaveTextContent('Unsuppressed with no valid EAC record')   // 200, the largest
+  })
+
   it('says so when the selection is empty', async () => {
     mock({ n: 0 } as Profile)
     draw()

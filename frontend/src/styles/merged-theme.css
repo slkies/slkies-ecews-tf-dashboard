@@ -55,15 +55,8 @@
 
   --brand-tint: rgb(5 91 101 / 0.12);
 
-  /* LearnUI-style ramp, teal -> amber the long way, L 0.50-0.62 for icon contrast */
-  /* re-suppressed takes the brand teal; awaiting DTC review takes coral */
-  --hue-1: #6666aa;   /* indigo  - index cohort */
-  --hue-2: #396e99;   /* blue    - commenced EAC */
-  --hue-3: #935ba1;   /* purple  - completed EAC */
-  --hue-4: #b8537c;   /* magenta - post-EAC VL sample */
-  --hue-5: #c46f00;   /* amber   - follow-up VL done */
-  --hue-6: #246f79;   /* teal    - re-suppressed */
-  --hue-7: #cb573d;   /* coral   - awaiting DTC review */
+  /* Every icon chip takes the Re-suppressed tile's teal (Es, 23 Oct 2026). */
+  --icon: #246f79;
 }
 
 .dark {
@@ -89,11 +82,5 @@
 
   --brand-tint: rgb(27 212 136 / 0.14);
 
-  --hue-1: #a5a7f0;
-  --hue-2: #79b0df;
-  --hue-3: #d69ae5;
-  --hue-4: #ff92bb;
-  --hue-5: #ffae1d;
-  --hue-6: #6bb2bc;
-  --hue-7: #ff977a;
+  --icon: #6bb2bc;
 }

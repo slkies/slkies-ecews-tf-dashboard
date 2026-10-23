@@ -25,6 +25,10 @@ export interface ChartPalette {
   // from the merged ramp, validated as a pair: CVD dE 16.8 light, both themes pass.
   series1: string
   series2: string
+  /** The cohort flow, in the Octet palette (Es, 23 Oct 2026): Enamelled Jewel
+   *  for entering, Retro Lime for leaving, the other swatches for the rest. */
+  flowIn: string; flowAgain: string; flowOut: string; flowCare: string
+  stock: string; stockFill: string
   unknown: string      // data gap, deliberately recessive
   provisional: string  // a period that has not finished happening
 }
@@ -35,6 +39,12 @@ export const PALETTE_LIGHT: ChartPalette = {
   male: '#de6129',      // merged ramp, warm end
   series1: '#008d6c',
   series2: '#5e5bb6',
+  flowIn: '#055b65',       // Enamelled Jewel - entered
+  flowAgain: '#45828b',    // Wish Upon a Star - entered again
+  flowOut: '#1bd488',      // Retro Lime - left, re-suppressed
+  flowCare: '#b2c9c5',     // Light Teal - left care before a repeat VL
+  stock: '#055b65',
+  stockFill: '#b2c9c5',
   unknown: '#d5dbdf',
   provisional: '#8794a0',
 }
@@ -45,6 +55,12 @@ export const PALETTE_DARK: ChartPalette = {
   male: '#e06b39',
   series1: '#20a89b',
   series2: '#8081d8',
+  flowIn: '#3f9aa5',       // the jewel, lifted to read on the dark card
+  flowAgain: '#b2c9c5',
+  flowOut: '#1bd488',
+  flowCare: '#5f7a7d',
+  stock: '#b2c9c5',
+  stockFill: '#45828b',
   unknown: '#3a4145',
   provisional: '#8f9aa3',
 }

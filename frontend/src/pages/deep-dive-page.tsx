@@ -21,7 +21,9 @@ import { api } from '@/core/api'
 import { useFilters } from '@/core/filters'
 import { DASH, fmt, fmtMonYY, pc } from '@/core/format'
 import { cssVar, useChartPalette } from '@/core/palette'
-import { WORKLISTS } from './worklists-page'
+import { SortHead, useSort } from '@/components/sortable'
+import { StatusBadge } from '@/components/status-badge'
+import { WORKLISTS, type Priority } from './worklists-page'
 
 /* ─────────────────────────────────── types ─────────────────────────────────── */
 
@@ -239,7 +241,6 @@ export default function DeepDivePage({ onOpenWorklist }: { onOpenWorklist?: (fla
     if (!f?.months?.length) return null
     const last = f.months.length - 1
     const labels = f.months.map(fmtMonYY)
-    const good = cssVar('--good', '#2f7d4f')
     const grey = cssVar('--muted-foreground', C.provisional)
     const fade = (c: string, a = 0.35) => c.startsWith('rgba(')
       ? c.replace(/,\s*[\d.]+\)$/, `, ${a})`)
@@ -256,10 +257,10 @@ export default function DeepDivePage({ onOpenWorklist }: { onOpenWorklist?: (fla
       flows: {
         type: 'bar',
         data: { labels, datasets: [
-          col('Entered, first time', f.entered_new, C.series2),
-          col('Entered again, after re-suppressing', f.entered_again, fade(C.series2, 0.55)),
-          col('Left: re-suppressed', f.left_resuppressed, good, true),
-          col('Left care before a repeat VL', f.left_care, grey, true),
+          col('Entered, first time', f.entered_new, C.flowIn),
+          col('Entered again, after re-suppressing', f.entered_again, C.flowAgain),
+          col('Left: re-suppressed', f.left_resuppressed, C.flowOut, true),
+          col('Left care before a repeat VL', f.left_care, C.flowCare, true),
         ] },
         options: {
           maintainAspectRatio: false,
@@ -284,8 +285,8 @@ export default function DeepDivePage({ onOpenWorklist }: { onOpenWorklist?: (fla
       stock: {
         type: 'line',
         data: { labels, datasets: [{
-          label: 'In the cohort at month end', data: f.in_cohort, borderColor: C.series1,
-          backgroundColor: fade(C.series1, 0.12), fill: true, borderWidth: 2,
+          label: 'In the cohort at month end', data: f.in_cohort, borderColor: C.stock,
+          backgroundColor: fade(C.stockFill, 0.35), fill: true, borderWidth: 2,
           segment: { borderDash: (c) => (c.p1DataIndex === last ? [5, 4] : undefined) },
         }] },
         options: {
@@ -445,8 +446,8 @@ export default function DeepDivePage({ onOpenWorklist }: { onOpenWorklist?: (fla
             </CardHeader>
             <CardContent className="flex flex-col gap-3">
               <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-muted-foreground">
-                {[['Entered, first time', C.series2], ['Entered again', `${C.series2}8c`],
-                  ['Left: re-suppressed', 'var(--good)'], ['Left care before a repeat VL', 'var(--muted-foreground)']]
+                {[['Entered, first time', C.flowIn], ['Entered again', C.flowAgain],
+                  ['Left: re-suppressed', C.flowOut], ['Left care before a repeat VL', C.flowCare]]
                   .map(([l, c]) => (
                     <span key={l} className="inline-flex items-center gap-1.5">
                       <span className="size-2.5 rounded-[3px]" style={{ background: c }} aria-hidden />{l}
@@ -469,8 +470,10 @@ export default function DeepDivePage({ onOpenWorklist }: { onOpenWorklist?: (fla
             <CardHeader>
               <CardTitle>In the cohort at month end</CardTitle>
               <CardDescription>
-                Clients still unsuppressed at the end of each month
-                {when.flow ? `, including ${fmt(when.flow.in_cohort_at_start)} who entered before the first month shown` : ''}.
+                How many clients are still unsuppressed at the end of each month: last month's
+                total, plus those who entered, minus those who re-suppressed or left care. It
+                rises while more enter than leave and levels off when the two balance
+                {when.flow ? `. It includes ${fmt(when.flow.in_cohort_at_start)} who entered before the first month shown` : ''}.
               </CardDescription>
             </CardHeader>
             <CardContent>
@@ -522,99 +525,129 @@ export default function DeepDivePage({ onOpenWorklist }: { onOpenWorklist?: (fla
       </Section>
 
       <Section eyebrow="Facilities" title="Facility league table"
-               description="Facilities with 20 or more episodes, weakest EAC commencement first.">
-        <Card className="min-w-0">
-          <CardContent className="px-0">
-            <div className="overflow-x-auto">
-              <Table className="text-xs">
-                <TableHeader className="bg-muted/50">
-                  <TableRow className="hover:bg-transparent">
-                    <TableHead>Facility</TableHead>
-                    <TableHead className="text-right">Episodes</TableHead>
-                    <TableHead className="w-44 text-right">EAC commenced</TableHead>
-                    <TableHead className="text-right">Follow-up VL results</TableHead>
-                    <TableHead className="text-right">Re-suppressed</TableHead>
-                    <TableHead className="text-right">Awaiting DTC review</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {(fac ?? []).filter((f) => f.n >= 20)
-                    .sort((a, b) => (a.eac1_pct ?? 0) - (b.eac1_pct ?? 0))
-                    .map((f) => {
-                      const r = (f.eac1_pct ?? 0) / 100
-                      const tone = r < 0.5 ? 'var(--bad)' : r < 0.75 ? 'var(--warn)' : 'var(--good)'
-                      const awaiting = Math.max(0, f.still_unsuppressed - f.switched)
-                      return (
-                        <TableRow key={f.group}>
-                          <TableCell className="font-medium">{f.group}</TableCell>
-                          <TableCell className="text-right tabular-nums">{fmt(f.n)}</TableCell>
-                          <TableCell>
-                            <div className="flex items-center justify-end gap-2">
-                              <span className="font-medium tabular-nums" style={{ color: tone }}>{pc(f.eac1_pct)}</span>
-                              <span className="h-2 w-20 rounded-[3px] bg-muted" aria-hidden>
-                                <span className="block h-full rounded-[3px]"
-                                      style={{ width: `${Math.min(r * 100, 100)}%`, background: tone }} />
-                              </span>
-                            </div>
-                          </TableCell>
-                          <TableCell className="text-right tabular-nums">{fmt(f.post_result)}</TableCell>
-                          <TableCell className="text-right tabular-nums">{pc(f.resupp_pct)}</TableCell>
-                          <TableCell className={cn('text-right tabular-nums',
-                                                   awaiting > 0 && 'font-medium text-bad')}>
-                            {fmt(awaiting)}
-                          </TableCell>
-                        </TableRow>
-                      )
-                    })}
-                  {!(fac ?? []).some((f) => f.n >= 20) && (
-                    <TableRow>
-                      <TableCell colSpan={6} className="h-20 text-center text-muted-foreground">
-                        No facility has 20 or more episodes in this selection.
-                      </TableCell>
-                    </TableRow>
-                  )}
-                </TableBody>
-              </Table>
-            </div>
-          </CardContent>
-        </Card>
+               description="Facilities with 20 or more episodes, weakest EAC commencement first. Click a heading to sort.">
+        <LeagueTable fac={fac} />
       </Section>
 
       <Section eyebrow="Act" title="Actionable flags"
-               description="Each row is a facility worklist under the current filters. Open one to work it.">
-        <Card className="min-w-0">
-          <CardContent className="px-0">
-            <Table className="text-xs">
-              <TableHeader className="bg-muted/50">
-                <TableRow className="hover:bg-transparent">
-                  <TableHead>Worklist</TableHead>
-                  <TableHead className="text-right">Episodes</TableHead>
-                  <TableHead className="w-24" />
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {WORKLISTS.map((w) => (
-                  <TableRow key={w.flag}>
-                    <TableCell className="font-medium">{w.label}</TableCell>
-                    <TableCell className={cn('text-right tabular-nums',
-                                             !counts[w.flag] && 'text-muted-foreground')}>
-                      {counts[w.flag] == null ? DASH : fmt(counts[w.flag])}
-                    </TableCell>
-                    <TableCell className="text-right">
-                      {onOpenWorklist && (
-                        <Button variant="outline" size="xs" onClick={() => onOpenWorklist(w.flag)}>
-                          Open
-                        </Button>
-                      )}
-                    </TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-          </CardContent>
-        </Card>
+               description="Each row is a facility worklist under the current filters, most urgent first. Open one to work it.">
+        <FlagsTable counts={counts} onOpenWorklist={onOpenWorklist} />
       </Section>
     </div>
+  )
+}
+
+type LeagueRow = FacilityRow & { awaiting: number }
+
+function LeagueTable({ fac }: { fac: FacilityRow[] | null }) {
+  const rows: LeagueRow[] = (fac ?? []).filter((f) => f.n >= 20)
+    .map((f) => ({ ...f, awaiting: Math.max(0, f.still_unsuppressed - f.switched) }))
+  const { sorted, sort, toggle } = useSort(rows, (r, k) => r[k as keyof LeagueRow],
+                                           { key: 'eac1_pct', dir: 'asc' })
+  return (
+    <Card className="min-w-0">
+      <CardContent className="px-0">
+        <div className="overflow-x-auto">
+          <Table className="text-xs">
+            <TableHeader className="bg-muted/50">
+              <TableRow className="hover:bg-transparent">
+                <SortHead label="Facility" k="group" sort={sort} onSort={toggle} text />
+                <SortHead label="Episodes" k="n" sort={sort} onSort={toggle} align="right" />
+                <SortHead label="EAC commenced" k="eac1_pct" sort={sort} onSort={toggle} align="right" className="w-44" />
+                <SortHead label="Follow-up VL results" k="post_result" sort={sort} onSort={toggle} align="right" />
+                <SortHead label="Re-suppressed" k="resupp_pct" sort={sort} onSort={toggle} align="right" />
+                <SortHead label="Awaiting DTC review" k="awaiting" sort={sort} onSort={toggle} align="right" />
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {sorted.map((f) => {
+                const r = (f.eac1_pct ?? 0) / 100
+                const tone = r < 0.5 ? 'var(--bad)' : r < 0.75 ? 'var(--warn)' : 'var(--good)'
+                return (
+                  <TableRow key={f.group}>
+                    <TableCell className="font-medium">{f.group}</TableCell>
+                    <TableCell className="text-right tabular-nums">{fmt(f.n)}</TableCell>
+                    <TableCell>
+                      <div className="flex items-center justify-end gap-2">
+                        <span className="font-medium tabular-nums" style={{ color: tone }}>{pc(f.eac1_pct)}</span>
+                        <span className="h-2 w-20 rounded-[3px] bg-muted" aria-hidden>
+                          <span className="block h-full rounded-[3px]"
+                                style={{ width: `${Math.min(r * 100, 100)}%`, background: tone }} />
+                        </span>
+                      </div>
+                    </TableCell>
+                    <TableCell className="text-right tabular-nums">{fmt(f.post_result)}</TableCell>
+                    <TableCell className="text-right tabular-nums">{pc(f.resupp_pct)}</TableCell>
+                    <TableCell className={cn('text-right tabular-nums', f.awaiting > 0 && 'font-medium text-bad')}>
+                      {fmt(f.awaiting)}
+                    </TableCell>
+                  </TableRow>
+                )
+              })}
+              {!rows.length && (
+                <TableRow>
+                  <TableCell colSpan={6} className="h-20 text-center text-muted-foreground">
+                    No facility has 20 or more episodes in this selection.
+                  </TableCell>
+                </TableRow>
+              )}
+            </TableBody>
+          </Table>
+        </div>
+      </CardContent>
+    </Card>
+  )
+}
+
+const PRIORITY_TONE: Record<Priority, 'bad' | 'warn' | null> = { High: 'bad', Medium: 'warn', Low: null }
+
+function FlagsTable({ counts, onOpenWorklist }: {
+  counts: Record<string, number | null>
+  onOpenWorklist?: (flag: string) => void
+}) {
+  const rows = WORKLISTS.map((w) => ({ ...w, n: counts[w.flag] ?? null }))
+  const { sorted, sort, toggle } = useSort(rows, (r, k) => r[k as keyof typeof r] as unknown,
+                                           { key: 'rank', dir: 'asc' })
+  return (
+    <Card className="min-w-0">
+      <CardContent className="px-0">
+        <Table className="text-xs">
+          <TableHeader className="bg-muted/50">
+            <TableRow className="hover:bg-transparent">
+              <SortHead label="Priority" k="rank" sort={sort} onSort={(k) => toggle(k, 'asc')} className="w-32" />
+              <SortHead label="Worklist" k="label" sort={sort} onSort={toggle} text />
+              <SortHead label="Episodes" k="n" sort={sort} onSort={toggle} align="right" />
+              <TableHead className="w-24" />
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {sorted.map((w) => (
+              <TableRow key={w.flag}>
+                <TableCell>
+                  {w.priority ? (
+                    <span className="inline-flex items-center gap-2">
+                      <span className="w-4 text-muted-foreground tabular-nums">{w.rank}</span>
+                      {PRIORITY_TONE[w.priority]
+                        ? <StatusBadge tone={PRIORITY_TONE[w.priority]!}>{w.priority}</StatusBadge>
+                        : <span className="text-muted-foreground">{w.priority}</span>}
+                    </span>
+                  ) : <span className="text-muted-foreground">Data check</span>}
+                </TableCell>
+                <TableCell className="font-medium">{w.label}</TableCell>
+                <TableCell className={cn('text-right tabular-nums', !w.n && 'text-muted-foreground')}>
+                  {w.n == null ? DASH : fmt(w.n)}
+                </TableCell>
+                <TableCell className="text-right">
+                  {onOpenWorklist && (
+                    <Button variant="outline" size="xs" onClick={() => onOpenWorklist(w.flag)}>Open</Button>
+                  )}
+                </TableCell>
+              </TableRow>
+            ))}
+          </TableBody>
+        </Table>
+      </CardContent>
+    </Card>
   )
 }
 

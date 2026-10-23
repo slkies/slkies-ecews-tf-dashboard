@@ -399,3 +399,21 @@ among the rest:
 They stay in the cohort count and in their own worklist, *Left care before a
 repeat VL*. A client who left care **after** a repeat VL stays in the cascade:
 their outcome is known.
+
+## 21. Worklists are ranked by clinical urgency
+**23 Oct 2026** — The needs-action worklists are ordered, on Worklists and in
+Deep dive's actionable flags, most urgent first:
+
+| Rank | Priority | Worklist | Why |
+|---|---|---|---|
+| 1 | High | Still unsuppressed after EAC, awaiting DTC review | a switch decision is overdue |
+| 2 | High | More than 2 EAC cycles, still failing | adherence support has not worked |
+| 3 | High | Active, unsuppressed over a year, never retested | reachable, and nothing done since |
+| 4 | Medium | Completed EAC 30+ days ago, no post-EAC VL | the decision is blocked on a sample |
+| 5 | Medium | Unsuppressed with no valid EAC record | no intervention yet |
+| 6 | Medium | Started EAC but not completed | intervention stalled |
+| 7 | Low | Unsuppressed for more than 6 months | a wide net overlapping the above |
+| 8 | Low | Left care before a repeat VL | tracing, not EAC |
+
+Context and data-check lists are not ranked. The order lives in one place
+(`WORKLISTS` in `worklists-page.tsx`) and is the programme's to change.

@@ -8,6 +8,7 @@ import { cn } from 'cn'
 import Chart from '@/components/Chart'
 import FilterBar, { PinFiltersToggle } from '@/components/filter-bar'
 import { KpiTile } from '@/components/kpi-tile'
+import { SortHead, useSort } from '@/components/sortable'
 import { StatusBadge, type Tone } from '@/components/status-badge'
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
@@ -128,37 +129,37 @@ function Headline({ data, trend, since }: { data: Ov; trend: Trend | null; since
 
   return (
     <section aria-label="Headline indicators" className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-      <KpiTile hue={1} icon={Users} label="Index cohort" value={fmt(data.n)}
+      <KpiTile icon={Users} label="Index cohort" value={fmt(data.n)}
                trend={tv?.cohort} better="neutral" since={since}
                note={`${fmt(data.clients)} clients · ${fmt(data.repeats)} repeat episodes`
                      + (data.left_care_untested ? ` · ${fmt(data.left_care_untested)} left care before a repeat VL` : '')}
                definition="Every treatment-failure episode in the Total Unsuppressed register. The unit is the episode - S/N, index VL date and value - so a client unsuppressed twice counts twice." />
-      <KpiTile hue={2} icon={HeartHandshake} label="Commenced EAC" value={pc(data.eac1_pct)}
+      <KpiTile icon={HeartHandshake} label="Commenced EAC" value={pc(data.eac1_pct)}
                trend={tv?.eac1} since={since}
                note={`${fmt(data.eac1)} of ${fmt(data.in_care ?? data.n)} · ${fmt(data.never_eac)} never started`}
                status={badge(rateTone(data.eac1_pct, 70, 'bad'))}
                definition="Episodes with EAC session 1 recorded, over episodes still in care or retested. Clients who left care before a repeat VL are not counted as a gap." />
-      <KpiTile hue={3} icon={CircleCheck} label="Completed EAC" value={pc(data.completed_pct)}
+      <KpiTile icon={CircleCheck} label="Completed EAC" value={pc(data.completed_pct)}
                trend={tv?.completed} since={since}
                note={`${fmt(data.completed)} of ${fmt(data.eac1)} commenced`}
                status={badge(rateTone(data.completed_pct, 50, 'warn'))}
                definition="Sessions 1-3 recorded and at least 30 days since session 3, over episodes that commenced EAC." />
-      <KpiTile hue={4} icon={TestTube} label="Post-EAC VL sample" value={pc(postEacPct)}
+      <KpiTile icon={TestTube} label="Post-EAC VL sample" value={pc(postEacPct)}
                trend={tv?.postEac} since={since}
                note={`${fmt(data.post_eac_vl)} of ${fmt(data.completed)} who completed EAC`}
                status={badge(rateTone(postEacPct, 60, 'bad'))}
                definition="Sessions 1-3 plus a viral load sample on or after session 3, over episodes that completed EAC. A different indicator from the follow-up VL." />
-      <KpiTile hue={5} icon={Microscope} label="Follow-up VL done" value={pc(data.retest_pct)}
+      <KpiTile icon={Microscope} label="Follow-up VL done" value={pc(data.retest_pct)}
                trend={tv?.retest} since={since}
                note={`${fmt(data.retested)} of ${fmt(data.in_care ?? data.n)} · ${fmt(data.awaiting_retest)} with no later VL`}
                status={badge(rateTone(data.retest_pct, 50, 'bad'))}
                definition="Episodes with any viral load sampled after the index result was received, over episodes still in care or retested. Taken from the clinical line lists, never the EAC sheet." />
-      <KpiTile hue={6} icon={Activity} label="Re-suppressed" value={pc(data.resupp_pct)}
+      <KpiTile icon={Activity} label="Re-suppressed" value={pc(data.resupp_pct)}
                trend={tv?.resupp} since={since}
                note={`${fmt(data.resuppressed)} of ${fmt(data.retested)} with a follow-up VL`}
                status={badge(rateTone(data.resupp_pct, 70, 'warn'))}
                definition="A follow-up viral load below 1,000 copies/mL, over episodes that have a follow-up VL." />
-      <KpiTile hue={7} icon={Gavel} label="Awaiting DTC review" value={fmt(data.awaiting_switch)}
+      <KpiTile icon={Gavel} label="Awaiting DTC review" value={fmt(data.awaiting_switch)}
                className="sm:col-span-2"
                note={`of ${fmt(data.still_unsuppressed)} episodes still at or above 1,000 copies/mL`}
                status={data.awaiting_switch
@@ -300,7 +301,7 @@ function NarrativeRow({ data }: { data: Ov }) {
           <ItemGroup>
             {rows.map((r) => (
               <Item key={r.label} size="xs" className="px-0">
-                <ItemMedia className="flex size-8 items-center justify-center rounded-lg bg-brand-tint text-primary [&_svg]:size-4">
+                <ItemMedia className="flex size-8 items-center justify-center rounded-lg bg-[color-mix(in_oklch,var(--icon)_14%,transparent)] text-[var(--icon)] [&_svg]:size-4">
                   <r.Icon aria-hidden />
                 </ItemMedia>
                 <ItemContent><ItemTitle className="font-normal">{r.label}</ItemTitle></ItemContent>
@@ -461,6 +462,7 @@ function ChartsRow({ data }: { data: Ov }) {
 
 function ResuppressionAndCascade({ data }: { data: Ov }) {
   const C = useChartPalette()
+  const prog = useSort(data.progress, (r, k) => r[k as keyof typeof r] as unknown)
   const t = data.resupp_trend
 
   const config = useMemo<ChartConfiguration | null>(() => {
@@ -530,17 +532,17 @@ function ResuppressionAndCascade({ data }: { data: Ov }) {
           <Table>
             <TableHeader>
               <TableRow>
-                <TableHead>Quarter</TableHead>
-                <TableHead className="text-right">Episodes</TableHead>
-                <TableHead className="text-right">Left care</TableHead>
-                <TableHead className="text-right">EAC commenced</TableHead>
-                <TableHead className="text-right">EAC completed</TableHead>
-                <TableHead className="text-right">Follow-up VL</TableHead>
-                <TableHead className="text-right">Re-suppressed</TableHead>
+                <SortHead label="Quarter" k="quarter" sort={prog.sort} onSort={prog.toggle} text />
+                <SortHead label="Episodes" k="n" sort={prog.sort} onSort={prog.toggle} align="right" />
+                <SortHead label="Left care" k="left_care" sort={prog.sort} onSort={prog.toggle} align="right" />
+                <SortHead label="EAC commenced" k="eac1_pct" sort={prog.sort} onSort={prog.toggle} align="right" />
+                <SortHead label="EAC completed" k="completed_pct" sort={prog.sort} onSort={prog.toggle} align="right" />
+                <SortHead label="Follow-up VL" k="retest_pct" sort={prog.sort} onSort={prog.toggle} align="right" />
+                <SortHead label="Re-suppressed" k="resupp_pct" sort={prog.sort} onSort={prog.toggle} align="right" />
               </TableRow>
             </TableHeader>
             <TableBody>
-              {data.progress?.map((p) => (
+              {prog.sorted.map((p) => (
                 <TableRow key={p.quarter}>
                   <TableCell className="font-medium">{p.quarter}</TableCell>
                   <TableCell className="text-right">{fmt(p.n)}</TableCell>
@@ -570,18 +572,20 @@ function PairCell({ n, rate }: { n: number; rate: number | null }) {
 /* ─────────────────────────────────── facilities ───────────────────────────── */
 
 function FacilityTable({ rows }: { rows: FacilityRow[] | undefined }) {
+  // Unsorted until a heading is clicked, so each table opens in its own ranking.
+  const { sorted, sort, toggle } = useSort(rows, (r, k) => r[k as keyof FacilityRow] as unknown)
   return (
     <Table>
       <TableHeader>
         <TableRow>
-          <TableHead>Facility</TableHead>
-          <TableHead className="text-right">Episodes</TableHead>
-          <TableHead className="text-right">EAC commenced</TableHead>
-          <TableHead className="text-right">EAC completed</TableHead>
+          <SortHead label="Facility" k="facility" sort={sort} onSort={toggle} text />
+          <SortHead label="Episodes" k="n" sort={sort} onSort={toggle} align="right" />
+          <SortHead label="EAC commenced" k="eac1_pct" sort={sort} onSort={toggle} align="right" />
+          <SortHead label="EAC completed" k="completed_pct" sort={sort} onSort={toggle} align="right" />
         </TableRow>
       </TableHeader>
       <TableBody>
-        {rows?.map((r, i) => (
+        {sorted.map((r, i) => (
           <TableRow key={`${r.facility ?? DASH}-${i}`}>
             <TableCell className="max-w-[16rem] truncate" title={r.facility ?? undefined}>{r.facility ?? DASH}</TableCell>
             <TableCell className="text-right">{fmt(r.n)}</TableCell>

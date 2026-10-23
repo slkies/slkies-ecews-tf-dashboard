@@ -3,6 +3,7 @@ import { ArrowRight, Stethoscope } from 'lucide-react'
 import { Fragment, useEffect, useMemo, useState } from 'react'
 import { cn } from 'cn'
 import { DataTable, SortableHeader } from '@/components/data-table/data-table'
+import { SortHead, useSort } from '@/components/sortable'
 import type { DataTableFeatures } from '@/components/data-table/data-table-features'
 import FilterBar, { PinFiltersToggle } from '@/components/filter-bar'
 import { Alert, AlertDescription } from '@/components/ui/alert'
@@ -115,6 +116,70 @@ const Swatch = ({ color, label }: { color: string; label: string }) => (
     <span className="size-2.5 rounded-[3px]" style={{ background: color }} aria-hidden />{label}
   </span>
 )
+
+function LabFacilities({ rows }: { rows: Awaiting['by_facility'] }) {
+  const { sorted, sort, toggle } = useSort(rows, (r, k) => r[k as keyof typeof r] as unknown,
+                                           { key: 'n', dir: 'desc' })
+  return (
+    <Card className="min-w-0">
+      <CardHeader><CardTitle>Facilities with the most samples outstanding</CardTitle></CardHeader>
+      <CardContent className="px-0">
+        <Table className="text-xs">
+          <TableHeader className="bg-muted/50">
+            <TableRow className="hover:bg-transparent">
+              <SortHead label="Facility" k="facility" sort={sort} onSort={toggle} text />
+              <SortHead label="Outstanding" k="n" sort={sort} onSort={toggle} align="right" />
+              <SortHead label="Median" k="median_days" sort={sort} onSort={toggle} align="right" />
+              <SortHead label="Longest" k="longest" sort={sort} onSort={toggle} align="right" />
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {sorted.map((f, i) => (
+              <TableRow key={`${f.facility}${i}`}>
+                <TableCell>{f.facility ?? DASH}</TableCell>
+                <TableCell className="text-right tabular-nums">{fmt(f.n)}</TableCell>
+                <TableCell className="text-right tabular-nums">{f.median_days} d</TableCell>
+                <TableCell className={cn('text-right tabular-nums', f.longest >= 60 && 'font-medium text-bad')}>{f.longest} d</TableCell>
+              </TableRow>
+            ))}
+          </TableBody>
+        </Table>
+      </CardContent>
+    </Card>
+  )
+}
+
+function LabLongest({ rows }: { rows: Awaiting['rows'] }) {
+  const { sorted, sort, toggle } = useSort(rows, (r, k) => r[k as keyof typeof r] as unknown,
+                                           { key: 'days', dir: 'desc' })
+  return (
+    <Card className="min-w-0">
+      <CardHeader><CardTitle>Longest outstanding</CardTitle></CardHeader>
+      <CardContent className="px-0">
+        <Table className="text-xs">
+          <TableHeader className="bg-muted/50">
+            <TableRow className="hover:bg-transparent">
+              <SortHead label="Waiting" k="days" sort={sort} onSort={toggle} align="right" />
+              <SortHead label="Sampled" k="sample_date" sort={sort} onSort={toggle} text />
+              <SortHead label="Facility" k="facility" sort={sort} onSort={toggle} text />
+              <SortHead label="Index VL" k="idx_vl" sort={sort} onSort={toggle} align="right" />
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {sorted.map((r, i) => (
+              <TableRow key={i}>
+                <TableCell className={cn('text-right tabular-nums', r.days >= 60 && 'font-medium text-bad')}>{r.days} d</TableCell>
+                <TableCell className="tabular-nums">{fmtDate(r.sample_date)}</TableCell>
+                <TableCell>{r.facility ?? DASH}</TableCell>
+                <TableCell className="text-right tabular-nums">{vlShort(r.idx_vl)}</TableCell>
+              </TableRow>
+            ))}
+          </TableBody>
+        </Table>
+      </CardContent>
+    </Card>
+  )
+}
 
 /* ──────────────────────────────── trajectory table ─────────────────────────── */
 
@@ -394,56 +459,8 @@ export default function DtcPage({ onOpenWorklist }: { onOpenWorklist?: (flag: st
               <Stat label="Waiting 60+ days" value={fmt(aw.over_60)} note="likely lost, not delayed" tone={aw.over_60 ? 'bad' : undefined} />
             </div>
             <div className="grid gap-4 xl:grid-cols-2">
-              <Card className="min-w-0">
-                <CardHeader><CardTitle>Facilities with the most samples outstanding</CardTitle></CardHeader>
-                <CardContent className="px-0">
-                  <Table className="text-xs">
-                    <TableHeader className="bg-muted/50">
-                      <TableRow className="hover:bg-transparent">
-                        <TableHead>Facility</TableHead>
-                        <TableHead className="text-right">Outstanding</TableHead>
-                        <TableHead className="text-right">Median</TableHead>
-                        <TableHead className="text-right">Longest</TableHead>
-                      </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                      {aw.by_facility.map((f, i) => (
-                        <TableRow key={`${f.facility}${i}`}>
-                          <TableCell>{f.facility ?? DASH}</TableCell>
-                          <TableCell className="text-right tabular-nums">{fmt(f.n)}</TableCell>
-                          <TableCell className="text-right tabular-nums">{f.median_days} d</TableCell>
-                          <TableCell className={cn('text-right tabular-nums', f.longest >= 60 && 'font-medium text-bad')}>{f.longest} d</TableCell>
-                        </TableRow>
-                      ))}
-                    </TableBody>
-                  </Table>
-                </CardContent>
-              </Card>
-              <Card className="min-w-0">
-                <CardHeader><CardTitle>Longest outstanding</CardTitle></CardHeader>
-                <CardContent className="px-0">
-                  <Table className="text-xs">
-                    <TableHeader className="bg-muted/50">
-                      <TableRow className="hover:bg-transparent">
-                        <TableHead className="text-right">Waiting</TableHead>
-                        <TableHead>Sampled</TableHead>
-                        <TableHead>Facility</TableHead>
-                        <TableHead className="text-right">Index VL</TableHead>
-                      </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                      {aw.rows.slice(0, 15).map((r, i) => (
-                        <TableRow key={i}>
-                          <TableCell className={cn('text-right tabular-nums', r.days >= 60 && 'font-medium text-bad')}>{r.days} d</TableCell>
-                          <TableCell className="tabular-nums">{fmtDate(r.sample_date)}</TableCell>
-                          <TableCell>{r.facility ?? DASH}</TableCell>
-                          <TableCell className="text-right tabular-nums">{vlShort(r.idx_vl)}</TableCell>
-                        </TableRow>
-                      ))}
-                    </TableBody>
-                  </Table>
-                </CardContent>
-              </Card>
+              <LabFacilities rows={aw.by_facility} />
+              <LabLongest rows={aw.rows.slice(0, 15)} />
             </div>
             <p className="text-xs text-muted-foreground">
               Longest first; {fmt(Math.min(15, aw.rows.length))} of {fmt(aw.n)} shown here.
