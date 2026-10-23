@@ -20,13 +20,18 @@ repo is public. Credentials live in `.env` (gitignored) or the host's secret sto
 
 ## 1. Where things run
 
-| | Branch | Served at | Status |
-|---|---|---|---|
-| Live dashboard | `main` | `/` | The original single-file app. **IT deploys from `main`.** |
-| React rebuild | `react` | `/app` | Every page rebuilt (23 Oct 2026). **Merge into `main` only when Es approves.** |
+**Version 2.0** (23 Oct 2026): the React rebuild is merged into `main`, which IT
+deploys from. One server, one database, two front ends that always show the same
+figures:
 
-Both are served by the same FastAPI backend and database, so they always show the
-same figures.
+| Served at | What | Source |
+|---|---|---|
+| `/app` | The React dashboard, every page rebuilt | `frontend/` |
+| `/` | The original single-file dashboard, unchanged | `backend/static/index.html` |
+
+Development continues on `react` and is merged into `main` for each release.
+`backend/scripts/bump_version.py` cuts a release: it bumps `app/VERSION`, commits
+and tags it; `/api/version` reports the version and commit being served.
 
 ## 2. How to run (local)
 
@@ -171,7 +176,8 @@ Previous snapshot: 14 Aug 2026 (4,228 episodes). Line list changes compares the 
 ## 7. Pending
 
 **Build**
-1. **Merge `react` into `main`** for IT to deploy — on Es's approval.
+1. **Which dashboard opens at `/`.** Today the original; the React one is at `/app`.
+   Es to decide whether `/` should open the React dashboard.
 2. **Deep dive: a box plot of the wait for a follow-up VL.** How long clients wait
    between the index result and their repeat sample: median, middle half and range,
    so a few very long waits do not hide the typical one. Built in August and
