@@ -30,7 +30,9 @@ services:
       # so a hosted deployment cannot silently run on a known signing key.
       APP_ENV: ${APP_ENV:-development}
       JWT_SECRET: ${JWT_SECRET:-}
-      ADMIN_PASSWORD: ${ADMIN_PASSWORD:-changeme}
+      # No default: unset means no seeded admin, never a guessable one.
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:-}
+      VIEWER_PASSWORD: ${VIEWER_PASSWORD:-}
     ports: ["8080:8000"]
     depends_on:
       db: {condition: service_healthy}

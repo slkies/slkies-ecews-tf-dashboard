@@ -317,7 +317,7 @@ def _make_user(client, admin_h, email="pwuser@ecews.org", pw="Correct-Horse-99")
     return uid, email, pw
 
 
-@pytest.mark.parametrize("pw", ["short", "changeme", "viewer1234", "blindalley"])
+@pytest.mark.parametrize("pw", ["short", "changeme", "change-me", "password123"])
 def test_weak_or_default_passwords_are_refused(client, admin_h, pw):
     r = client.post("/api/users", headers=admin_h,
                     json={"username": "weak", "email": "weak@ecews.org", "password": pw})

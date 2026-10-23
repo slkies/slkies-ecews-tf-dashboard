@@ -76,8 +76,9 @@ says what changed between two of them.
 ## Security checklist (do this first — the app is public once deployed)
 - [ ] **Strong `JWT_SECRET`** — a long random string. On Render the blueprint
       generates one automatically.
-- [ ] **Change `ADMIN_PASSWORD`** from the local `blindalley`.
-- [ ] **Change `VIEWER_PASSWORD`** from the default `viewer1234`.
+- [ ] **Set `ADMIN_PASSWORD`** (and `VIEWER_PASSWORD` if you want the shared
+      read-only account) to strong values. There are no defaults: an unset one
+      means that account is not created.
 - [ ] **HTTPS on** — automatic on Render/Railway/Fly; mandatory.
 - [ ] Never commit `.env` (already in `.gitignore`).
 

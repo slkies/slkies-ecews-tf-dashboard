@@ -49,18 +49,23 @@ async def lifespan(app: FastAPI):
                           kwargs={"row_factory": dict_row})
     with pool.connection() as c:
         c.execute((Path(__file__).parent / "schema.sql").read_text())
-        # seed each account only if absent, so both survive an existing DB
+        # Seed each account only if absent, so both survive an existing DB, and
+        # only when its password is set in the environment: there is no default
+        # password in the code, so an unset one means no account, not a guessable one.
         def _seed(username, email, name, role, pw):
+            if not pw:
+                log.warning("No password set for the %s account; not created.", username)
+                return
             if not c.execute("SELECT 1 FROM users WHERE email=%s", (email,)).fetchone():
                 c.execute("INSERT INTO users (username,email,password_hash,"
                           "full_name,role) VALUES (%s,%s,%s,%s,%s)",
                           (username, email, hash_password(pw), name, role))
                 log.warning("Seeded %s (%s) - change this password.", username, role)
         _seed("admin", "admin@ecews.org", "Administrator", "admin",
-              os.getenv("ADMIN_PASSWORD", "changeme"))
+              os.getenv("ADMIN_PASSWORD"))
         # a shared read-only account so others can log in and test immediately
         _seed("viewer", "viewer@ecews.org", "Viewer", "viewer",
-              os.getenv("VIEWER_PASSWORD", "viewer1234"))
+              os.getenv("VIEWER_PASSWORD"))
     yield
     pool.close()
 
@@ -963,11 +968,11 @@ class NewPassword(BaseModel):
 
 
 # Minimum length, configurable so ECEWS policy can raise it without a code
-# change. The seeded defaults are refused outright: the whole point of a reset
-# is to stop an account sitting on a password that is printed in this source.
+# change. Common defaults and the .env.example placeholder are refused
+# outright, so no account can sit on a password anyone could guess.
 MIN_PASSWORD = int(os.getenv("MIN_PASSWORD_LENGTH", "10"))
-_BANNED = {"changeme", "viewer1234", "blindalley", "password", "admin",
-           "12345678", "password123"}
+_BANNED = {"changeme", "change-me", "password", "admin", "12345678",
+           "password123"}
 
 
 def _check_password(pw: str) -> None:
