@@ -243,20 +243,80 @@ function useColumns() {
   ]), [])
 }
 
+/**
+ * A list's client rows, sortable and searchable, with the server-side export
+ * for analysts and administrators. `exportPath` is the filtered /export query
+ * the download repeats; `flag` narrows it to one worklist. Shared with the
+ * Treatment plans page.
+ */
+export function ClientTable({ rows, exportPath, flag, caption, loading = false }: {
+  rows: ClientRow[]; exportPath: string; flag?: string; caption?: string; loading?: boolean
+}) {
+  const { me } = useSession()
+  const canExport = me?.role === 'admin' || me?.role === 'analyst'
+  const columns = useColumns()
+  const [exporting, setExporting] = useState<'selected' | 'all' | null>(null)
+  const [exportErr, setExportErr] = useState<string | null>(null)
+
+  async function runExport(kind: 'selected' | 'all', selected: ClientRow[]) {
+    setExporting(kind); setExportErr(null)
+    try {
+      if (kind === 'selected') {
+        await downloadExport(exportPath, { flag, episodes: selected.map((r) => r.episode) })
+      } else {
+        const sep = exportPath.includes('?') ? '&' : '?'
+        await downloadExport(flag ? `${exportPath}${sep}flag=${flag}` : exportPath)
+      }
+    } catch (e) {
+      setExportErr(e instanceof Error ? e.message : 'Export failed')
+    } finally {
+      setExporting(null)
+    }
+  }
+
+  return (
+    <>
+      {exportErr && (
+        <Alert variant="destructive" className="mb-3"><AlertDescription>{exportErr}</AlertDescription></Alert>
+      )}
+      <div className={cn('transition-opacity', loading && 'pointer-events-none opacity-60')}>
+        <DataTable columns={columns} data={rows}
+                   getRowId={(r) => r.episode} searchColumn="facility"
+                   searchPlaceholder="Search facilities" columnLabels={LABELS}
+                   // Off by default so the table fits a laptop; the list
+                   // is mostly Active anyway, and exports are Active only.
+                   hiddenColumns={['art_status']}
+                   caption={caption} emptyText="No facility matches that search."
+                   actions={(selected) => canExport && (
+                     <>
+                       <Button variant="outline" size="sm" disabled={!selected.length || exporting !== null}
+                               onClick={() => runExport('selected', selected)}>
+                         {exporting === 'selected' ? <Spinner /> : <Download />}
+                         Export selected{selected.length ? ` (${fmt(selected.length)})` : ''}
+                       </Button>
+                       <Button size="sm" disabled={exporting !== null}
+                               onClick={() => runExport('all', selected)}>
+                         {exporting === 'all' ? <Spinner /> : <Download />}
+                         Export all active
+                       </Button>
+                     </>
+                   )} />
+      </div>
+    </>
+  )
+}
+
 /** `initialFlag` opens a particular list, e.g. when arriving from a cascade step. */
 export default function WorklistsPage({ initialFlag = null }: { initialFlag?: string | null } = {}) {
   const { query, options } = useFilters()
   const { me } = useSession()
   const canExport = me?.role === 'admin' || me?.role === 'analyst'
-  const columns = useColumns()
 
   const [counts, setCounts] = useState<Record<string, number | null> | null>(null)
   const [flag, setFlag] = useState<string | null>(initialFlag)
   const [rows, setRows] = useState<ClientRow[] | null>(null)
   const [loadingRows, setLoadingRows] = useState(false)
   const [err, setErr] = useState<string | null>(null)
-  const [exporting, setExporting] = useState<'selected' | 'all' | null>(null)
-  const [exportErr, setExportErr] = useState<string | null>(null)
 
   // Counts for every list, under the current filters.
   useEffect(() => {
@@ -290,23 +350,6 @@ export default function WorklistsPage({ initialFlag = null }: { initialFlag?: st
   const current = WORKLISTS.find((w) => w.flag === flag)
   const total = flag ? counts?.[flag] ?? null : null
   const capped = total != null && total > ROW_LIMIT
-
-  async function runExport(kind: 'selected' | 'all', selected: ClientRow[]) {
-    if (!flag) return
-    setExporting(kind); setExportErr(null)
-    try {
-      const sep = query ? '&' : '?'
-      if (kind === 'selected') {
-        await downloadExport(`/export${query}`, { flag, episodes: selected.map((r) => r.episode) })
-      } else {
-        await downloadExport(`/export${query}${sep}flag=${flag}`)
-      }
-    } catch (e) {
-      setExportErr(e instanceof Error ? e.message : 'Export failed')
-    } finally {
-      setExporting(null)
-    }
-  }
 
   return (
     <div className="flex flex-col gap-6">
@@ -379,9 +422,6 @@ export default function WorklistsPage({ initialFlag = null }: { initialFlag?: st
             <CardAction><ListChecks className="size-5 text-muted-foreground" aria-hidden /></CardAction>
           </CardHeader>
           <CardContent>
-            {exportErr && (
-              <Alert variant="destructive" className="mb-3"><AlertDescription>{exportErr}</AlertDescription></Alert>
-            )}
             {rows === null || (loadingRows && !rows.length) ? (
               <div className="flex flex-col gap-2" aria-busy="true" aria-label="Loading the list">
                 {Array.from({ length: 6 }, (_, i) => <Skeleton key={i} className="h-9 w-full" />)}
@@ -395,29 +435,8 @@ export default function WorklistsPage({ initialFlag = null }: { initialFlag?: st
                 </EmptyHeader>
               </Empty>
             ) : (
-              <div className={cn('transition-opacity', loadingRows && 'pointer-events-none opacity-60')}>
-                <DataTable key={`${flag}${query}`} columns={columns} data={rows}
-                           getRowId={(r) => r.episode} searchColumn="facility"
-                           searchPlaceholder="Search facilities" columnLabels={LABELS}
-                           // Off by default so the table fits a laptop; the list
-                           // is mostly Active anyway, and exports are Active only.
-                           hiddenColumns={['art_status']}
-                           caption={current?.label} emptyText="No facility matches that search."
-                           actions={(selected) => canExport && (
-                             <>
-                               <Button variant="outline" size="sm" disabled={!selected.length || exporting !== null}
-                                       onClick={() => runExport('selected', selected)}>
-                                 {exporting === 'selected' ? <Spinner /> : <Download />}
-                                 Export selected{selected.length ? ` (${fmt(selected.length)})` : ''}
-                               </Button>
-                               <Button size="sm" disabled={exporting !== null}
-                                       onClick={() => runExport('all', selected)}>
-                                 {exporting === 'all' ? <Spinner /> : <Download />}
-                                 Export all active
-                               </Button>
-                             </>
-                           )} />
-              </div>
+              <ClientTable key={`${flag}${query}`} rows={rows} loading={loadingRows}
+                           exportPath={`/export${query}`} flag={flag ?? undefined} caption={current?.label} />
             )}
           </CardContent>
         </Card>

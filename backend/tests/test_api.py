@@ -762,3 +762,11 @@ def test_worklist_rows_carry_both_viral_loads_with_their_dates(client, admin_h, 
     header = client.get("/api/export", headers=admin_h).text.splitlines()[0]
     assert "Follow-up VL sample collected" in header
     assert "Follow-up VL received at facility" in header
+
+
+def test_plans_carry_a_sex_split_that_adds_up(client, admin_h, cohort):
+    plans = client.get("/api/plans", headers=admin_h).json()
+    assert plans
+    assert sum(p["n"] for p in plans) == client.get("/api/summary", headers=admin_h).json()["n"]
+    for p in plans:
+        assert p["n_female"] + p["n_male"] <= p["n"]

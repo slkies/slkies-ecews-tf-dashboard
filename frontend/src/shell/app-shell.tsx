@@ -21,6 +21,7 @@ import DeepDivePage from '@/pages/deep-dive-page'
 import DtcPage from '@/pages/dtc-page'
 import TimeMetricsPage from '@/pages/time-metrics-page'
 import OverviewPage from '@/pages/overview-page'
+import PlansPage from '@/pages/plans-page'
 import WorklistsPage from '@/pages/worklists-page'
 import { NAV } from './nav'
 
@@ -92,6 +93,10 @@ export default function AppShell() {
           ) : view === 'compare' ? (
             <ErrorBoundary name="Line list changes">
               <ComparePage />
+            </ErrorBoundary>
+          ) : view === 'plans' ? (
+            <ErrorBoundary name="Treatment plans">
+              <PlansPage />
             </ErrorBoundary>
           ) : view === 'time' ? (
             <ErrorBoundary name="Time metrics">

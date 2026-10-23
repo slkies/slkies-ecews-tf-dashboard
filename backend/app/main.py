@@ -610,9 +610,9 @@ def get_plans(u: U, f: F):
     df = _load(u, f)
     if df.empty:
         return []
-    vc = df["treatment_plan"].value_counts()
-    return [{"plan": k, "n": int(v), "pct": round(v / len(df) * 100, 1)}
-            for k, v in vc.items()]
+    # Split by sex, as every bar on the dashboard is.
+    return [{"plan": r.pop("level"), **r}
+            for r in ind._dist(df["treatment_plan"], sex=ind._col(df, "sex"))]
 
 
 # Deep-dive flags (spec §3) - each one is a facility worklist.
