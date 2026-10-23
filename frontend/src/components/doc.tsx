@@ -1,7 +1,8 @@
 /**
- * Reading pages (Guidelines, Methodology): a measure of about 70 characters,
- * headings that step down, and a callout for the sentence that matters. No
- * inline bold in the running text; emphasis is carried by the callout.
+ * Reading pages (Guidelines, Methodology): headings that step down, and a
+ * callout for the sentence that matters. Content fills the card, like every
+ * other page (Es, 23 Oct 2026: a 70-character measure left most of each card
+ * empty). No inline bold in the running text; the callout carries emphasis.
  */
 import type { ReactNode } from 'react'
 import { cn } from 'cn'
@@ -13,7 +14,7 @@ import {
 export function Doc({ eyebrow, title, children }: { eyebrow?: string; title: string; children: ReactNode }) {
   return (
     <Card className="min-w-0">
-      <CardContent className="flex max-w-3xl flex-col gap-4 text-sm leading-relaxed text-foreground/90">
+      <CardContent className="flex flex-col gap-4 text-sm leading-relaxed text-foreground/90">
         {eyebrow && <span className="text-[11px] font-medium tracking-[0.08em] text-muted-foreground uppercase">{eyebrow}</span>}
         <h2 className="text-xl font-semibold tracking-tight text-foreground text-balance">{title}</h2>
         {children}

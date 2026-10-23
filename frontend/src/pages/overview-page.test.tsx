@@ -167,10 +167,10 @@ describe('Overview page', () => {
     await waitFor(() => expect(screen.queryByText(/volume but no EAC/)).not.toBeInTheDocument())
   })
 
-  it('lists the source sheets and marks a censored one', () => {
+  it('leaves methodology and data sources to the Methodology page', () => {
     draw(BASE)
-    expect(screen.getByText('TF Register')).toBeInTheDocument()
-    expect(screen.getByText('Censored')).toBeInTheDocument()
+    expect(screen.queryByText('Methodology and data sources')).not.toBeInTheDocument()
+    expect(screen.queryByText('TF Register')).not.toBeInTheDocument()
   })
 
   it('hides export from a viewer', () => {

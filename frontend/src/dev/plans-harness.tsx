@@ -42,7 +42,7 @@ createRoot(document.getElementById('root')!).render(
         <AppSidebar view="plans" onNavigate={() => {}} asof="12 Sep 2026" episodes="4,633" clients="4,180" />
         <SidebarInset>
           <SiteHeader title="Treatment plans" />
-          <div className="mx-auto flex w-full max-w-[1440px] flex-1 flex-col gap-6 p-4 lg:p-6">
+          <div className="flex w-full flex-1 flex-col gap-6 p-4 lg:p-6">
             <PlansPage />
           </div>
         </SidebarInset>

@@ -125,7 +125,7 @@ createRoot(document.getElementById('root')!).render(
               <AppSidebar view="overview" onNavigate={() => {}} asof="5 Sep 2026" episodes="4,548" clients="4,101" />
               <SidebarInset>
                 <SiteHeader title="Overview" />
-                <div className="mx-auto flex w-full max-w-[1440px] flex-1 flex-col gap-6 p-4 lg:p-6">
+                <div className="flex w-full flex-1 flex-col gap-6 p-4 lg:p-6">
                   <OverviewPage data={DATA} times={TIMES} trend={TREND} loading={false} />
                 </div>
               </SidebarInset>

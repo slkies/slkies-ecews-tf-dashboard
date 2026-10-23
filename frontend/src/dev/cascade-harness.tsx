@@ -72,7 +72,7 @@ createRoot(document.getElementById('root')!).render(
               <AppSidebar view="cascade" onNavigate={() => {}} asof="5 Sep 2026" episodes="4,548" clients="4,101" />
               <SidebarInset>
                 <SiteHeader title="Cascade" />
-                <div className="mx-auto flex w-full max-w-[1440px] flex-1 flex-col gap-6 p-4 lg:p-6">
+                <div className="flex w-full flex-1 flex-col gap-6 p-4 lg:p-6">
                   <CascadePage onOpenWorklist={(f) => console.info('open worklist', f)} />
                 </div>
               </SidebarInset>

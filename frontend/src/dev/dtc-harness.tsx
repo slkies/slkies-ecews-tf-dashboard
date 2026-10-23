@@ -43,7 +43,7 @@ createRoot(document.getElementById('root')!).render(
         <AppSidebar view="dtc" onNavigate={() => {}} asof="12 Sep 2026" episodes="4,633" clients="4,180" />
         <SidebarInset>
           <SiteHeader title="DTC review" />
-          <div className="mx-auto flex w-full max-w-[1440px] flex-1 flex-col gap-6 p-4 lg:p-6">
+          <div className="flex w-full flex-1 flex-col gap-6 p-4 lg:p-6">
             <DtcPage onOpenWorklist={(f) => console.info('open worklist', f)} />
           </div>
         </SidebarInset>

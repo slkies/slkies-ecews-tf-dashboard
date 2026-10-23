@@ -24,7 +24,7 @@ import {
 import { Skeleton } from '@/components/ui/skeleton'
 import { Spinner } from '@/components/ui/spinner'
 import {
-  Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
+  Table, TableBody, TableCell, TableHeader, TableRow,
 } from '@/components/ui/table'
 import { getToken } from '@/core/api'
 import { useFilters } from '@/core/filters'
@@ -33,12 +33,6 @@ import type { Dist, FacilityRow, Overview as Ov, TimeMetrics } from '@/core/over
 import { cssVar, useChartPalette } from '@/core/palette'
 import { useSession } from '@/core/session'
 import type { Trend } from '@/core/use-trend'
-
-const SRC_KIND: Record<string, string> = {
-  total: 'Total Unsuppressed register',
-  treatment: 'Treatment line list',
-  eac: 'EAC line list',
-}
 
 /** "On track" or a named shortfall, from the same thresholds the original used. */
 function rateTone(v: number | null | undefined, floor: number, severity: Tone): [Tone, string] | null {
@@ -113,7 +107,6 @@ export default function OverviewPage({ data, times, trend, loading }: {
           <ResuppressionAndCascade data={data!} />
           <FacilityRow data={data!} />
           <ZeroEac data={data!} />
-          <Sources data={data!} asofLong={asofLong} />
         </div>
       )}
     </div>
@@ -650,71 +643,6 @@ function ZeroEac({ data }: { data: Ov }) {
             </Item>
           ))}
         </ItemGroup>
-      </CardContent>
-    </Card>
-  )
-}
-
-/* ─────────────────────────────────── sources ──────────────────────────────── */
-
-function Sources({ data, asofLong }: { data: Ov; asofLong: string }) {
-  const rules = [
-    ['The unit of analysis', `the failure episode (S/N, index VL date and value), never the client; ${fmt(data.repeat_clients)} clients were unsuppressed more than once.`],
-    ['The cohort', 'a quarterly open cohort drawn from the Total Unsuppressed register.'],
-    ['Viral loads', 'index and follow-up both come from the clinical line lists, never the EAC sheet.'],
-    ['The follow-up VL', 'the next VL sampled after the index result was received.'],
-    ['Left care before a repeat VL', 'an ART status of LTFU, IIT, stopped, died, transferred out or discontinued, with no follow-up VL. Counted in the cohort but taken out of every gap measure, because no team action closes it; listed in its own worklist.'],
-    ['EAC completed', 'sessions 1-3 recorded plus at least 30 days since session 3.'],
-    ['Post-EAC VL', 'sessions 1-3 recorded and a viral load sample collected on or after session 3, irrespective of the 30-day rule, over episodes that completed EAC. A different indicator from the follow-up VL, which is any VL sampled after the index result.'],
-  ]
-  return (
-    <Card>
-      <CardHeader className="border-b">
-        <CardTitle>Methodology and data sources</CardTitle>
-        <CardDescription>How the numbers on this page are built, and the line lists they rest on.</CardDescription>
-      </CardHeader>
-      {/* Two columns only from xl: split earlier, the definitions wrapped into a
-          tall narrow column and the sources table hid its censored badge. */}
-      <CardContent className="grid gap-8 xl:grid-cols-2">
-        <dl className="flex flex-col gap-3 text-sm">
-          {rules.map(([term, text]) => (
-            <div key={term} className="grid gap-0.5 sm:grid-cols-[10rem_1fr] sm:gap-4">
-              <dt className="text-muted-foreground">{term}</dt>
-              <dd className="text-foreground/85">{text}</dd>
-            </div>
-          ))}
-        </dl>
-        {/* The table leads so its first row lines up with "The unit of analysis". */}
-        <div className="flex flex-col gap-3">
-          {data.sources?.length ? (
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Sheet</TableHead>
-                  <TableHead>Type</TableHead>
-                  <TableHead className="text-right">Rows</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {data.sources.map((s) => (
-                  <TableRow key={s.name}>
-                    <TableCell className="max-w-[14rem] truncate" title={s.name}>{s.name}</TableCell>
-                    <TableCell>
-                      <span className="inline-flex items-center gap-2">
-                        {SRC_KIND[s.kind] ?? s.kind}
-                        {s.censored && <StatusBadge tone="warn">Censored</StatusBadge>}
-                      </span>
-                    </TableCell>
-                    <TableCell className="text-right">{fmt(s.rows)}</TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-          ) : <p className="text-sm text-muted-foreground">The sheet list is unavailable for this upload.</p>}
-          <p className="rounded-lg bg-muted/60 px-3 py-2 text-sm">
-            Line list as of {asofLong}. This date sets the fiscal quarter and the follow-up window.
-          </p>
-        </div>
       </CardContent>
     </Card>
   )

@@ -43,6 +43,7 @@ window.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
                   facility_state: { 'Delta Facility A': 'Delta', 'Osun Facility B': 'Osun' } })
   }
   if (url.includes('/api/summary')) return json({ n: 4633, clients: 4180, as_of: '2026-10-17' })
+  if (url.includes('/api/overview')) return json({ n: 4633, clients: 4180, repeat_clients: 380, as_of: '2026-10-17', filename: 'tf_deidentified_2026-10-17.zip', sources: [{ name: 'Total_Unsuppressed', kind: 'total', rows: 4247 }, { name: 'Treatment_Oct', kind: 'treatment', rows: 180651 }, { name: 'EAC_May', kind: 'eac', rows: 41000, censored: true }, { name: 'EAC_Sep', kind: 'eac', rows: 52000 }] })
   if (url.includes('/api/dq')) return json(DQ)
   if (url.includes('/api/users')) return json(USERS)
   if (url.includes('/api/uploads')) return json(UPLOADS)
@@ -67,7 +68,7 @@ createRoot(document.getElementById('root')!).render(
         <AppSidebar view={key} onNavigate={() => {}} asof="17 Oct 2026" episodes="4,633" clients="4,180" />
         <SidebarInset>
           <SiteHeader title={title} />
-          <div className="mx-auto flex w-full max-w-[1440px] flex-1 flex-col gap-6 p-4 lg:p-6">{page}</div>
+          <div className="flex w-full flex-1 flex-col gap-6 p-4 lg:p-6">{page}</div>
         </SidebarInset>
       </SidebarProvider>
     </FilterProvider></SessionProvider></TooltipProvider></ThemeProvider>

@@ -20,6 +20,7 @@ function mock() {
     const json = (b: unknown) => ({ ok: true, status: 200, json: async () => b, headers: new Headers() })
     if (url.startsWith('/api/dq')) return json(DQ)
     if (url.startsWith('/api/summary')) return json({ n: 4633, clients: 4180, as_of: '2026-10-17' })
+    if (url.startsWith('/api/overview')) return json({ n: 4633, clients: 4180, repeat_clients: 380, as_of: '2026-10-17', filename: 'tf_deidentified_2026-10-17.zip', sources: [{ name: 'Total_Unsuppressed', kind: 'total', rows: 4247 }, { name: 'Treatment_Oct', kind: 'treatment', rows: 180651 }, { name: 'EAC_May', kind: 'eac', rows: 41000, censored: true }, { name: 'EAC_Sep', kind: 'eac', rows: 52000 }] })
     return json({ ok: true })
   }))
 }
@@ -50,6 +51,19 @@ describe('Methodology and Guidelines', () => {
   it('counts the second and later failures from the current line list', async () => {
     render(<MethodologyPage />)
     expect(await screen.findByText(/would delete the 453 second/)).toBeInTheDocument()
+  })
+
+  it('lists the data sources apart from the definitions, marking an excluded sheet', async () => {
+    render(<MethodologyPage />)
+    const card = (await screen.findByText('Every sheet read')).closest('[data-slot=card]') as HTMLElement
+    expect(within(card).getByText(/dated 17 Oct 2026/)).toBeInTheDocument()
+    const may = within(card).getByText('EAC_May').closest('tr')!
+    expect(may).toHaveTextContent('Excluded: success-censored')
+    // the EAC tile counts only the rows used, and says a sheet was left out
+    const eac = within(card).getAllByText('EAC line lists')[0]!.closest('[data-slot=card]') as HTMLElement
+    expect(eac).toHaveTextContent('52,000rows used')
+    expect(eac).toHaveTextContent('2 sheets, 1 excluded')
+    expect(within(card).queryByText('Follow-up VL')).toBeNull()
   })
 
   it('maps every guideline rule to where it is measured', () => {
