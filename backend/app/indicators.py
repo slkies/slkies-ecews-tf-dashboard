@@ -978,7 +978,7 @@ def time_to_unsupp_curve(df: pd.DataFrame) -> dict:
     return out
 
 
-def kaplan_meier(df: pd.DataFrame) -> list[dict]:
+def kaplan_meier(df: pd.DataFrame, as_of=None) -> list[dict]:
     """
     Time from EAC session 1 to re-suppression. Clients who have not re-suppressed
     are right-censored, not dropped, so the curve does not flatter the programme.
@@ -989,7 +989,11 @@ def kaplan_meier(df: pd.DataFrame) -> list[dict]:
     worked in-process while 500-ing over HTTP.
     """
     s1 = df.get("s1_date", _col(df, "Session_1_Date"))
-    fu = df.get("fu_date", _col(df, "Followup_VL_Result_Date"))
+    # The result-received date, or the sample date where that is blank - an
+    # upload made before fu_date was derived has none, and every re-suppression
+    # then fell back to "today" and was counted as an event on the wrong day.
+    fu_d = pd.to_datetime(_col(df, "fu_date"), errors="coerce")
+    fu = fu_d.where(fu_d.notna(), pd.to_datetime(_col(df, "fu_samp"), errors="coerce"))
     if s1 is None:
         return []
 
@@ -1003,7 +1007,10 @@ def kaplan_meier(df: pd.DataFrame) -> list[dict]:
     if d.empty:
         return []
 
-    now = pd.Timestamp.today().normalize()
+    # Censored at the line list's date, never today: the same file must give
+    # the same curve however long it has been loaded (as build_cohort's as_of).
+    now = pd.Timestamp(as_of) if as_of is not None else pd.Timestamp.today().normalize()
+    d = d[~d["event"] | d["fu"].notna()]          # an event needs a date to place it
     # event -> days to the re-suppressing result; censored -> days observed so far
     d["t"] = (d["fu"].where(d["event"]).fillna(now) - d["s1"]).dt.days
     obs = d[["t", "event"]].dropna()

@@ -586,7 +586,11 @@ def get_times(u: U, f: F):
 @app.get("/api/survival")
 def get_survival(u: U, f: F):
     df = _load(u, f)
-    return ind.kaplan_meier(df) if not df.empty else []
+    if df.empty:
+        return []
+    with pool.connection() as c:
+        up = c.execute("SELECT as_of FROM uploads WHERE is_current").fetchone()
+    return ind.kaplan_meier(df, as_of=up["as_of"] if up else None)
 
 
 DIMS = {"state", "lga", "lga_res_norm", "facility", "sex", "age_band", "regimen_line",

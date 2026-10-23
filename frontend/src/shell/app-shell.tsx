@@ -18,6 +18,7 @@ import { useTrend } from '@/core/use-trend'
 import CascadePage from '@/pages/cascade-page'
 import DeepDivePage from '@/pages/deep-dive-page'
 import DtcPage from '@/pages/dtc-page'
+import TimeMetricsPage from '@/pages/time-metrics-page'
 import OverviewPage from '@/pages/overview-page'
 import WorklistsPage from '@/pages/worklists-page'
 import { NAV } from './nav'
@@ -86,6 +87,10 @@ export default function AppShell() {
           ) : view === 'dtc' ? (
             <ErrorBoundary name="DTC review">
               <DtcPage onOpenWorklist={openWorklist} />
+            </ErrorBoundary>
+          ) : view === 'time' ? (
+            <ErrorBoundary name="Time metrics">
+              <TimeMetricsPage />
             </ErrorBoundary>
           ) : view === 'cascade' ? (
             <ErrorBoundary name="Cascade">

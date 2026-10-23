@@ -348,7 +348,9 @@ provisional or it will report a collapse from 95% to 37% that is arithmetic.
    "not rebuilt yet" and links to `/`. **DTC review is rebuilt**: the switch gap by state
    and group, the log-drop reading of the VL response, the laboratory queue, per-client
    VL trajectories (data table), repeat-unsuppression odds ratios and the DTC worklists.
-   Next: Time metrics, then Line list changes. Since 22 Oct 2026 every gap measure
+   **Time metrics is rebuilt**: the four medians, six timed steps as box plots against
+   their targets, the time-to-switch gap, the Kaplan-Meier curve to re-suppression and
+   time on ART to the first unsuppressed VL by ART-start era. Next: Line list changes. Since 22 Oct 2026 every gap measure
    excludes clients who left care before a repeat VL (decision 20).
 
 **Open asks to the HI/EMR team (blocking better analysis):**

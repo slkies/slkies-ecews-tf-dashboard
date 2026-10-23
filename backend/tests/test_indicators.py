@@ -617,3 +617,19 @@ def test_profile_distributions_carry_a_sex_split():
     p = profile(cohort([mk()], status="Active").df)
     row = p["who"]["age_band"][0]
     assert {"n_female", "n_male"} <= set(row) and row["n_female"] + row["n_male"] <= row["n"]
+
+
+# ── survival: dated events, censored at the line-list date ─────────────
+def test_kaplan_meier_dates_events_by_sample_when_result_date_is_blank_and_censors_at_as_of():
+    from app.indicators import kaplan_meier
+    df = pd.DataFrame([
+        # re-suppressed: result date blank, sample 100 days after session 1
+        {"s1_date": "2026-01-01", "fu_date": None, "fu_samp": "2026-04-11", "resuppressed": True, "eac1": True},
+        # not re-suppressed: censored at the line-list date, 200 days after session 1
+        {"s1_date": "2026-01-01", "fu_date": None, "fu_samp": None, "resuppressed": False, "eac1": True},
+    ])
+    km = kaplan_meier(df, as_of="2026-07-20")
+    events = [p for p in km if p["t"] > 0]
+    assert events and events[0]["t"] == 100 and events[0]["survival"] == 0.5
+    # nothing placed at "today": the censored episode ends at the as-of date
+    assert all(p["t"] <= 200 for p in km)
