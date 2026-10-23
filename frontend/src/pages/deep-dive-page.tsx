@@ -22,8 +22,7 @@ import { useFilters } from '@/core/filters'
 import { DASH, fmt, fmtMonYY, pc } from '@/core/format'
 import { cssVar, useChartPalette } from '@/core/palette'
 import { SortHead, useSort } from '@/components/sortable'
-import { StatusBadge } from '@/components/status-badge'
-import { WORKLISTS, type Priority } from './worklists-page'
+import { PriorityMark, WORKLISTS } from './worklists-page'
 
 /* ─────────────────────────────────── types ─────────────────────────────────── */
 
@@ -600,8 +599,6 @@ function LeagueTable({ fac }: { fac: FacilityRow[] | null }) {
   )
 }
 
-const PRIORITY_TONE: Record<Priority, 'bad' | 'warn' | null> = { High: 'bad', Medium: 'warn', Low: null }
-
 function FlagsTable({ counts, onOpenWorklist }: {
   counts: Record<string, number | null>
   onOpenWorklist?: (flag: string) => void
@@ -628,11 +625,9 @@ function FlagsTable({ counts, onOpenWorklist }: {
                   {w.priority ? (
                     <span className="inline-flex items-center gap-2">
                       <span className="w-4 text-muted-foreground tabular-nums">{w.rank}</span>
-                      {PRIORITY_TONE[w.priority]
-                        ? <StatusBadge tone={PRIORITY_TONE[w.priority]!}>{w.priority}</StatusBadge>
-                        : <span className="text-muted-foreground">{w.priority}</span>}
+                      <PriorityMark priority={w.priority} />
                     </span>
-                  ) : <span className="text-muted-foreground">Data check</span>}
+                  ) : <PriorityMark />}
                 </TableCell>
                 <TableCell className="font-medium">{w.label}</TableCell>
                 <TableCell className={cn('text-right tabular-nums', !w.n && 'text-muted-foreground')}>

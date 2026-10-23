@@ -14,6 +14,7 @@ import { Checkbox } from '@/components/ui/checkbox'
 import {
   Empty, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle,
 } from '@/components/ui/empty'
+import { StatusBadge } from '@/components/status-badge'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Spinner } from '@/components/ui/spinner'
 import { api } from '@/core/api'
@@ -22,7 +23,6 @@ import { useFilters } from '@/core/filters'
 import { DASH, fmt, fmtDate } from '@/core/format'
 import { useSession } from '@/core/session'
 
-/** The worklists the backend defines (FLAGS in main.py), in the order a team works them. */
 /**
  * The worklists the backend defines (FLAGS in main.py). Needs-action lists are
  * in priority order, most clinically urgent first (agreed 23 Oct 2026):
@@ -41,20 +41,45 @@ export type Priority = 'High' | 'Medium' | 'Low'
 export const WORKLISTS: {
   flag: string; label: string; group: 'Needs action' | 'Context and data checks'
   rank?: number; priority?: Priority
+  /** What a facility team does next, in one line. */
+  next: string
 }[] = [
-  { flag: 'awaiting_switch', label: 'Still unsuppressed after EAC, awaiting DTC review', group: 'Needs action', rank: 1, priority: 'High' },
-  { flag: 'dtc_review', label: 'More than 2 EAC cycles, still failing', group: 'Needs action', rank: 2, priority: 'High' },
-  { flag: 'never_retested', label: 'Active, unsuppressed over a year, never retested', group: 'Needs action', rank: 3, priority: 'High' },
-  { flag: 'awaiting_vl', label: 'Completed EAC 30+ days ago, no post-EAC VL sample', group: 'Needs action', rank: 4, priority: 'Medium' },
-  { flag: 'no_eac', label: 'Unsuppressed with no valid EAC record', group: 'Needs action', rank: 5, priority: 'Medium' },
-  { flag: 'eac_incomplete', label: 'Started EAC but not completed', group: 'Needs action', rank: 6, priority: 'Medium' },
-  { flag: 'long_unsuppressed', label: 'Unsuppressed for more than 6 months', group: 'Needs action', rank: 7, priority: 'Low' },
-  { flag: 'exited_no_vl', label: 'Left care before a repeat VL', group: 'Needs action', rank: 8, priority: 'Low' },
-  { flag: 'prior_switch', label: 'Already switched before the index VL', group: 'Context and data checks' },
-  { flag: 'trunc_pre', label: 'Sample taken before EAC session 1', group: 'Context and data checks' },
-  { flag: 'trunc_mid', label: 'Sample taken mid-cycle, before session 3', group: 'Context and data checks' },
-  { flag: 'prior_cycle', label: 'EAC session predates the index VL', group: 'Context and data checks' },
+  { flag: 'awaiting_switch', label: 'Still unsuppressed after EAC, awaiting DTC review', group: 'Needs action', rank: 1, priority: 'High',
+    next: 'Present at the next DTC meeting for a decision on the next regimen line.' },
+  { flag: 'dtc_review', label: 'More than 2 EAC cycles, still failing', group: 'Needs action', rank: 2, priority: 'High',
+    next: 'Refer to the DTC: repeated EAC has not worked, so adherence alone is unlikely to explain it.' },
+  { flag: 'never_retested', label: 'Active, unsuppressed over a year, never retested', group: 'Needs action', rank: 3, priority: 'High',
+    next: 'Collect a VL sample now. Without a repeat test, the failure is not being measured.' },
+  { flag: 'awaiting_vl', label: 'Completed EAC 30+ days ago, no post-EAC VL sample', group: 'Needs action', rank: 4, priority: 'Medium',
+    next: 'Collect the post-EAC VL sample. It was due once 30 days had passed since session 3.' },
+  { flag: 'no_eac', label: 'Unsuppressed with no valid EAC record', group: 'Needs action', rank: 5, priority: 'Medium',
+    next: 'Start EAC, or enter the sessions if they were held but not recorded.' },
+  { flag: 'eac_incomplete', label: 'Started EAC but not completed', group: 'Needs action', rank: 6, priority: 'Medium',
+    next: 'Book the remaining sessions. Three are needed before the repeat VL.' },
+  { flag: 'long_unsuppressed', label: 'Unsuppressed for more than 6 months', group: 'Needs action', rank: 7, priority: 'Low',
+    next: 'A wider net that overlaps the lists above. Check each client is on one of them.' },
+  { flag: 'exited_no_vl', label: 'Left care before a repeat VL', group: 'Needs action', rank: 8, priority: 'Low',
+    next: 'Trace and return to care. This is tracing work, not an EAC gap.' },
+  { flag: 'prior_switch', label: 'Already switched before the index VL', group: 'Context and data checks',
+    next: 'Context only: the client was already switched when the index VL was taken.' },
+  { flag: 'trunc_pre', label: 'Sample taken before EAC session 1', group: 'Context and data checks',
+    next: 'Check the dates. A sample taken before EAC began cannot measure the effect of EAC.' },
+  { flag: 'trunc_mid', label: 'Sample taken mid-cycle, before session 3', group: 'Context and data checks',
+    next: 'Check the dates. A sample taken before session 3 means the cycle was cut short.' },
+  { flag: 'prior_cycle', label: 'EAC session predates the index VL', group: 'Context and data checks',
+    next: 'Check the dates. A session dated before the index VL belongs to an earlier cycle.' },
 ]
+
+const PRIORITY_TONE: Record<Priority, 'bad' | 'warn' | null> = { High: 'bad', Medium: 'warn', Low: null }
+
+/** A list's priority: High and Medium as status badges, Low as plain text, data checks marked as such. */
+export function PriorityMark({ priority }: { priority?: Priority }) {
+  if (!priority) return <span className="text-xs text-muted-foreground">Data check</span>
+  const tone = PRIORITY_TONE[priority]
+  return tone
+    ? <StatusBadge tone={tone}>{priority}</StatusBadge>
+    : <span className="text-xs text-muted-foreground">{priority}</span>
+}
 
 const ROW_LIMIT = 5000
 
@@ -136,7 +161,10 @@ function useColumns() {
       header: ({ column }) => <SortableHeader column={column} title="State" />,
       cell: ({ getValue }) => getValue() ?? DASH,
     }),
-    col.accessor('sex', { header: 'Sex', cell: ({ getValue }) => getValue() ?? DASH, enableSorting: false }),
+    col.accessor('sex', {
+      header: ({ column }) => <SortableHeader column={column} title="Sex" />,
+      cell: ({ getValue }) => getValue() ?? DASH,
+    }),
     col.accessor('age', {
       header: ({ column }) => <SortableHeader column={column} title="Age" align="right" />,
       cell: ({ getValue }) => <span className="block text-right tabular-nums">{getValue() ?? DASH}</span>,
@@ -207,11 +235,10 @@ function useColumns() {
       cell: ({ getValue }) => getValue() ?? DASH,
     }),
     col.accessor('treatment_plan', {
-      header: 'Plan',
+      header: ({ column }) => <SortableHeader column={column} title="Plan" />,
       cell: ({ getValue }) => (
         <span className="block max-w-[12rem] truncate" title={getValue() ?? undefined}>{getValue() ?? DASH}</span>
       ),
-      enableSorting: false,
     }),
   ]), [])
 }
@@ -320,7 +347,10 @@ export default function WorklistsPage({ initialFlag = null }: { initialFlag?: st
                             'flex items-start justify-between gap-3 rounded-lg px-3 py-2 text-left text-sm transition-colors',
                             on ? 'bg-accent text-accent-foreground ring-1 ring-primary/25' : 'hover:bg-muted',
                           )}>
-                    <span className="leading-snug">{w.label}</span>
+                    <span className="flex flex-col items-start gap-1">
+                      <span className="leading-snug">{w.label}</span>
+                      {w.priority && <PriorityMark priority={w.priority} />}
+                    </span>
                     {counts === null
                       ? <Skeleton className="mt-0.5 h-4 w-8" />
                       : <span className={cn('mt-0.5 shrink-0 text-xs font-medium tabular-nums',
@@ -336,7 +366,11 @@ export default function WorklistsPage({ initialFlag = null }: { initialFlag?: st
 
         <Card className="min-w-0">
           <CardHeader>
-            <CardTitle className="text-balance">{current?.label ?? 'Worklist'}</CardTitle>
+            <CardTitle className="flex flex-wrap items-center gap-2 text-balance">
+              {current?.label ?? 'Worklist'}
+              {current && <PriorityMark priority={current.priority} />}
+            </CardTitle>
+            {current && <p className="text-sm text-foreground">{current.next}</p>}
             <CardDescription>
               {total == null ? DASH : `${fmt(total)} ${total === 1 ? 'episode' : 'episodes'}`}
               {capped && ` · the table shows the first ${fmt(ROW_LIMIT)}; export for the full list`}

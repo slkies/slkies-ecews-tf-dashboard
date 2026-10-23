@@ -82,6 +82,16 @@ describe('Worklists page', () => {
     expect(calls.some((c) => c.url.includes('/api/clients') && c.url.includes('flag=eac_incomplete'))).toBe(true)
   })
 
+  it('shows each list\'s priority, and what the team does next', async () => {
+    mockApi('viewer')
+    draw()
+    const nav = await screen.findByRole('navigation', { name: 'Worklists' })
+    expect(within(nav).getAllByText('High')).toHaveLength(3)
+    expect(within(nav).queryByText('Data check')).toBeNull()
+    await screen.findByText('Delta Facility 2')
+    expect(screen.getByText('Book the remaining sessions. Three are needed before the repeat VL.')).toBeInTheDocument()
+  })
+
   it('marks a follow-up VL still at or above 1,000 in words as well as colour', async () => {
     mockApi('viewer')
     draw()

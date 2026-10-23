@@ -16,6 +16,7 @@ import type { Overview as Ov, TimeMetrics } from '@/core/overview'
 import type { Summary } from '@/core/types'
 import { useTrend } from '@/core/use-trend'
 import CascadePage from '@/pages/cascade-page'
+import ComparePage from '@/pages/compare-page'
 import DeepDivePage from '@/pages/deep-dive-page'
 import DtcPage from '@/pages/dtc-page'
 import TimeMetricsPage from '@/pages/time-metrics-page'
@@ -87,6 +88,10 @@ export default function AppShell() {
           ) : view === 'dtc' ? (
             <ErrorBoundary name="DTC review">
               <DtcPage onOpenWorklist={openWorklist} />
+            </ErrorBoundary>
+          ) : view === 'compare' ? (
+            <ErrorBoundary name="Line list changes">
+              <ComparePage />
             </ErrorBoundary>
           ) : view === 'time' ? (
             <ErrorBoundary name="Time metrics">
