@@ -822,9 +822,17 @@ def export_selected(body: ExportSelection, u: U, f: F, request: Request):
 
 
 @app.get("/api/risk")
-def get_risk(u: U, f: F):
+def get_risk(u: U, f: F, request: Request):
     df = _load(u, f)
-    return ind.resuppression_model(df) if not df.empty else {"ok": False, "reason": "No data."}
+    if df.empty:
+        return {"ok": False, "reason": "No data."}
+    out = ind.resuppression_model(df)
+    # The lowest-chance list is client rows, so reading it is a patient-data
+    # access like opening a worklist, and is recorded the same way.
+    if out.get("lowest_chance"):
+        _audit("clients.view", user_id=u["id"], email=u["email"], request=request,
+               detail=_access_note(f, "risk_lowest_chance", len(out["lowest_chance"])))
+    return out
 
 
 @app.get("/api/mortality")

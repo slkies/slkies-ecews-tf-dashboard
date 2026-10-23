@@ -3,6 +3,7 @@ Spec §9 requires unit tests for the decision tree, the temporal matching logic
 and the negative-value exclusion. Plus the guard that matters most in practice:
 detecting a success-censored EAC export.
 """
+import numpy as np
 import pandas as pd
 import pytest
 
@@ -633,3 +634,27 @@ def test_kaplan_meier_dates_events_by_sample_when_result_date_is_blank_and_censo
     assert events and events[0]["t"] == 100 and events[0]["survival"] == 0.5
     # nothing placed at "today": the censored episode ends at the as-of date
     assert all(p["t"] <= 200 for p in km)
+
+
+def test_the_risk_list_leaves_out_clients_who_left_care_before_a_retest():
+    from app.indicators import resuppression_model
+    rng = np.random.default_rng(7)
+    n_train, n_pend = 160, 20
+    n = n_train + n_pend
+    df = pd.DataFrame({
+        "sn": [f"0.{i:012d}" for i in range(n)],
+        "sex": rng.choice(["Female", "Male"], n),
+        "idx_vl": rng.integers(1_000, 500_000, n).astype(float),
+        "eac1": rng.random(n) > 0.2, "eac3": rng.random(n) > 0.5,
+        "post_result": [True] * n_train + [False] * n_pend,
+        "resuppressed": list(rng.random(n_train) > 0.3) + [False] * n_pend,
+        # half the pending clients died or transferred out before a retest
+        "art_status": ["Active"] * (n_train + n_pend // 2) + ["Died", "Transferred out"] * (n_pend // 4),
+        "facility": "F", "state": "Delta", "age": 30.0, "sessions": 1, "paed": False,
+        "treatment_plan": "B. Complete EAC, update register and EMR",
+    })
+    r = resuppression_model(df)
+    assert r["ok"]
+    assert r["n_scored"] == n_pend // 2 and r["n_left_care"] == n_pend // 2
+    kept = set(df["sn"][n_train:n_train + n_pend // 2])
+    assert {x["sn"] for x in r["lowest_chance"]} == kept

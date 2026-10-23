@@ -770,3 +770,10 @@ def test_plans_carry_a_sex_split_that_adds_up(client, admin_h, cohort):
     assert sum(p["n"] for p in plans) == client.get("/api/summary", headers=admin_h).json()["n"]
     for p in plans:
         assert p["n_female"] + p["n_male"] <= p["n"]
+
+
+def test_reading_the_risk_list_is_recorded_when_it_returns_clients(client, admin_h, cohort):
+    r = client.get("/api/risk", headers=admin_h).json()
+    rows = client.get("/api/audit?action=clients.view", headers=admin_h).json()["rows"]
+    noted = any("risk_lowest_chance" in x["detail"] for x in rows)
+    assert noted == bool(r.get("lowest_chance"))

@@ -15,6 +15,7 @@ import { fmt, fmtDate } from '@/core/format'
 import type { Overview as Ov, TimeMetrics } from '@/core/overview'
 import type { Summary } from '@/core/types'
 import { useTrend } from '@/core/use-trend'
+import AdvancedPage from '@/pages/advanced-page'
 import CascadePage from '@/pages/cascade-page'
 import ComparePage from '@/pages/compare-page'
 import DeepDivePage from '@/pages/deep-dive-page'
@@ -97,6 +98,10 @@ export default function AppShell() {
           ) : view === 'plans' ? (
             <ErrorBoundary name="Treatment plans">
               <PlansPage />
+            </ErrorBoundary>
+          ) : view === 'adv' ? (
+            <ErrorBoundary name="Advanced analytics">
+              <AdvancedPage />
             </ErrorBoundary>
           ) : view === 'time' ? (
             <ErrorBoundary name="Time metrics">

@@ -2097,8 +2097,11 @@ def resuppression_model(df: pd.DataFrame) -> dict:
                         "observed": round(float(y[chunk].mean() * 100), 1),
                         "n": int(len(chunk))})
 
-    # score every episode still awaiting a result
-    pend = df[~df["post_result"].fillna(False).astype(bool)]
+    # Score every episode still awaiting a result - except clients who left
+    # care before one (decision 20). The list says "chase these for a repeat
+    # sample", which cannot be done for a client who died or transferred out.
+    gone = left_care_untested(df)
+    pend = df[~df["post_result"].fillna(False).astype(bool) & ~gone]
     scored = []
     if len(pend):
         Zp = (_design(pend).to_numpy(float) - mu) / sd
@@ -2118,6 +2121,7 @@ def resuppression_model(df: pd.DataFrame) -> dict:
         "ok": True,
         "n_train": int(len(train)),
         "n_scored": int(len(pend)),
+        "n_left_care": int(gone.sum()),
         "baseline": round(float(y.mean() * 100), 1),
         "auc": round(auc, 3),
         "odds_ratios": sorted(
