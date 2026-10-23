@@ -34,3 +34,4 @@ __pycache__/
 # Dockerfile's first stage, never edited by hand.
 frontend/node_modules/
 backend/static_app/
+frontend/.vite/
