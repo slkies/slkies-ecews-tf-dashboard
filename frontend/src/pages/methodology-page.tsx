@@ -1,6 +1,6 @@
 import { ClipboardList, FileSpreadsheet, HeartPulse, type LucideIcon } from 'lucide-react'
 import { useEffect, useState } from 'react'
-import { Callout, Doc, H3, RefTable } from '@/components/doc'
+import { Callout, Doc, DocGrid, H3, RefTable } from '@/components/doc'
 import { SortHead, useSort } from '@/components/sortable'
 import { StatusBadge } from '@/components/status-badge'
 import { Card, CardContent } from '@/components/ui/card'
@@ -46,81 +46,84 @@ export default function MethodologyPage() {
         </p>
       </div>
 
-      <Doc eyebrow="Data Analysis Plan v3.0" title="The unit of analysis is a failure episode">
-        <p>
-          A client may fail, complete EAC, re-suppress, and fail again. That is two index events and
-          two trips through the cascade: one client, two episodes. The key is the client S/N, the
-          index VL date and the index VL value together, never the S/N alone.
-          {ov?.repeat_clients ? ` In the current line list, ${fmt(ov.repeat_clients)} clients were unsuppressed more than once.` : ''}
-        </p>
-        <Callout>
-          De-duplicating on the S/N would delete {repeats == null ? 'every' : `the ${fmt(repeats)}`} second
-          and later failures in the current line list, the highest-priority switch candidates in the
-          programme.
-        </Callout>
-        <p>
-          Rates are computed per episode. Distinct client counts are shown alongside, so no headline
-          double-counts a person.
-        </p>
-      </Doc>
+      <DocGrid>
+        <Doc eyebrow="Data Analysis Plan v3.0" title="The unit of analysis is a failure episode">
+          <p>
+            A client may fail, complete EAC, re-suppress, and fail again. That is two index events and
+            two trips through the cascade: one client, two episodes. The key is the client S/N, the
+            index VL date and the index VL value together, never the S/N alone.
+            {ov?.repeat_clients ? ` In the current line list, ${fmt(ov.repeat_clients)} clients were unsuppressed more than once.` : ''}
+          </p>
+          <Callout>
+            De-duplicating on the S/N would delete {repeats == null ? 'every' : `the ${fmt(repeats)}`} second
+            and later failures in the current line list, the highest-priority switch candidates in the
+            programme.
+          </Callout>
+          <p>
+            Rates are computed per episode. Distinct client counts are shown alongside, so no headline
+            double-counts a person.
+          </p>
+        </Doc>
 
-      <Doc title="The index cohort is an open cohort with quarterly enrolment">
-        <p>
-          The cohort is drawn quarterly from the Total Unsuppressed register. A snapshot of clients
-          whose current VL is 1,000 or more, drawn on the same day as the line list, cannot support
-          the outcome half of the cascade: a post-EAC VL becomes the current VL, so a client who
-          re-suppresses leaves the cohort, and one who is still failing has no later result. Steps
-          7 to 10 would compute to exactly zero.
-        </p>
-        <p>
-          Building the index list quarterly freezes each index event in the quarter it occurred, so a
-          post-EAC VL can land after it. That is why the cascade has an outcome arm at all.
-        </p>
-      </Doc>
+        <Doc title="The index cohort is an open cohort with quarterly enrolment">
+          <p>
+            The cohort is drawn quarterly from the Total Unsuppressed register. A snapshot of clients
+            whose current VL is 1,000 or more, drawn on the same day as the line list, cannot support
+            the outcome half of the cascade: a post-EAC VL becomes the current VL, so a client who
+            re-suppresses leaves the cohort, and one who is still failing has no later result. Steps
+            7 to 10 would compute to exactly zero.
+          </p>
+          <p>
+            Building the index list quarterly freezes each index event in the quarter it occurred, so a
+            post-EAC VL can land after it. That is why the cascade has an outcome arm at all.
+          </p>
+        </Doc>
 
-      <Doc title="Who is counted as a gap">
-        <p>
-          A client who left care before a repeat VL is not a gap a team can close. They are counted
-          in the cohort, shown as their own cascade step and worklist, and left out of every gap
-          measure: the cascade steps after it, the Overview rates, the facility and state tables,
-          the gap worklists and the risk list. A client who left care after being retested stays
-          in, because their outcome is known.
-        </p>
-        <p>
-          Worklists are ranked by clinical urgency. High: a decision is overdue. Medium: the next
-          step has not happened. Low: wider nets that overlap the lists above, and clients who have
-          left care. Data checks are not ranked.
-        </p>
-      </Doc>
+        <Doc title="Who is counted as a gap">
+          <p>
+            A client who left care before a repeat VL is not a gap a team can close. They are counted
+            in the cohort, shown as their own cascade step and worklist, and left out of every gap
+            measure: the cascade steps after it, the Overview rates, the facility and state tables,
+            the gap worklists and the risk list. A client who left care after being retested stays
+            in, because their outcome is known.
+          </p>
+          <p>
+            Worklists are ranked by clinical urgency. High: a decision is overdue. Medium: the next
+            step has not happened. Low: wider nets that overlap the lists above, and clients who have
+            left care. Data checks are not ranked.
+          </p>
+        </Doc>
 
-      <Doc title="Definitions">
-        <RefTable head={['Term', 'Definition']} rows={[
-          ['Failure episode', 'One index VL of 1,000 copies/mL or more, and everything that follows from it'],
-          ['Unsuppressed', 'VL 1,000 copies/mL or more'],
-          ['Low-level viraemia', 'VL 50 to 999 copies/mL'],
-          ['Undetectable', 'VL below 50 copies/mL'],
-          ['Viral loads', 'Index and follow-up both come from the treatment line lists, never the EAC sheet'],
-          ['Follow-up VL', 'The next VL sampled after the index result was received'],
-          ['Re-suppressed', 'Follow-up VL below 1,000 copies/mL, including low-level viraemia'],
-          ['Valid EAC cycle', 'Session 1 on or after the index VL date'],
-          ['EAC completed', 'Sessions 1, 2 and 3 recorded, and 30 days or more since session 3'],
-          ['Post-EAC VL', 'Among episodes that completed EAC: sessions 1 to 3 recorded and a VL sample collected on or after session 3, whatever the 30-day rule. A different indicator from the follow-up VL, which is any VL sampled after the index result'],
-          ['Left care before a repeat VL', 'An ART status of LTFU, IIT, stopped, died, transferred out or discontinued, with no follow-up VL'],
-          ['Fiscal year', '1 October to 30 September. Q1 is October to December, Q4 is July to September'],
-        ]} />
-      </Doc>
+        <Doc title="Known data gaps">
+          <p>Raised with the HI team. The dashboard says so where these apply, rather than hiding them.</p>
+          <RefTable head={['Gap', 'Effect']} rows={[
+            ['No switch date in the export', 'Time to switch cannot be measured, and step 10 cannot be attributed to a cycle'],
+            ['Some EAC lists are success-censored', 'Their outcomes are unusable; the sheets are excluded automatically and marked in Data sources below'],
+            ['The client key is exported as a number', 'Joins break silently after an Excel re-save; it is handled as text here'],
+            ['State names are cased inconsistently', 'Normalised when a line list is loaded'],
+          ]} />
+        </Doc>
 
-      <DataSources ov={ov} failed={failed} />
+        <Doc title="Definitions" wide>
+          <RefTable head={['Term', 'Definition']} rows={[
+            ['Failure episode', 'One index VL of 1,000 copies/mL or more, and everything that follows from it'],
+            ['Unsuppressed', 'VL 1,000 copies/mL or more'],
+            ['Low-level viraemia', 'VL 50 to 999 copies/mL'],
+            ['Undetectable', 'VL below 50 copies/mL'],
+            ['Viral loads', 'Index and follow-up both come from the treatment line lists, never the EAC sheet'],
+            ['Follow-up VL', 'The next VL sampled after the index result was received'],
+            ['Re-suppressed', 'Follow-up VL below 1,000 copies/mL, including low-level viraemia'],
+            ['Valid EAC cycle', 'Session 1 on or after the index VL date'],
+            ['EAC completed', 'Sessions 1, 2 and 3 recorded, and 30 days or more since session 3'],
+            ['Post-EAC VL', 'Among episodes that completed EAC: sessions 1 to 3 recorded and a VL sample collected on or after session 3, whatever the 30-day rule. A different indicator from the follow-up VL, which is any VL sampled after the index result'],
+            ['Left care before a repeat VL', 'An ART status of LTFU, IIT, stopped, died, transferred out or discontinued, with no follow-up VL'],
+            ['Fiscal year', '1 October to 30 September. Q1 is October to December, Q4 is July to September'],
+          ]} />
+        </Doc>
 
-      <Doc title="Known data gaps">
-        <p>Raised with the HI team. The dashboard says so where these apply, rather than hiding them.</p>
-        <RefTable head={['Gap', 'Effect']} rows={[
-          ['No switch date in the export', 'Time to switch cannot be measured, and step 10 cannot be attributed to a cycle'],
-          ['Some EAC lists are success-censored', 'Their outcomes are unusable; the sheets are excluded automatically and marked in Data sources above'],
-          ['The client key is exported as a number', 'Joins break silently after an Excel re-save; it is handled as text here'],
-          ['State names are cased inconsistently', 'Normalised when a line list is loaded'],
-        ]} />
-      </Doc>
+        <DataSources ov={ov} failed={failed} />
+      </DocGrid>
+
     </div>
   )
 }
@@ -131,7 +134,7 @@ function DataSources({ ov, failed }: { ov: Overview | null; failed: boolean }) {
   const { sorted, sort, toggle } = useSort(rows, (r, k) => r[k as keyof typeof r] as unknown, { key: 'order', dir: 'asc' })
 
   return (
-    <Doc title="Data sources">
+    <Doc title="Data sources" wide>
       <p>
         {ov?.as_of
           ? `The current line list is dated ${fmtDate(ov.as_of)}${ov.filename ? ` (${ov.filename})` : ''}. That date sets the fiscal quarter and the follow-up windows. It holds ${fmt(ov.n)} episodes from ${fmt(ov.clients)} clients.`

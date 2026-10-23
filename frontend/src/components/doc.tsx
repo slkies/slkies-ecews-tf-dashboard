@@ -11,10 +11,26 @@ import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from '@/components/ui/table'
 
-export function Doc({ eyebrow, title, children }: { eyebrow?: string; title: string; children: ReactNode }) {
+/**
+ * Sections side by side from 1,280px. A full-width paragraph on a wide monitor
+ * runs to about 200 characters a line, and past about 90 the eye loses its
+ * place returning to the next line, so readers re-read or skip lines. Two
+ * columns keep each line near 65 to 90 characters without wasting the width.
+ * Whole sections sit side by side rather than one section's text flowing
+ * across columns, which would make a reader jump mid-thought. Below 1,280px a
+ * column would be under 450px, so the page stays single-column.
+ */
+export function DocGrid({ children }: { children: ReactNode }) {
+  return <div className="grid gap-6 xl:grid-cols-2">{children}</div>
+}
+
+/** `wide` spans both columns: for a section that is mostly a table. */
+export function Doc({ eyebrow, title, children, wide = false }: {
+  eyebrow?: string; title: string; children: ReactNode; wide?: boolean
+}) {
   return (
-    <Card className="min-w-0">
-      <CardContent className="flex flex-col gap-4 text-sm leading-relaxed text-foreground/90">
+    <Card className={cn('min-w-0', wide && 'xl:col-span-2')}>
+      <CardContent className="flex flex-col gap-4 text-sm leading-relaxed text-foreground/90 2xl:text-[15px]">
         {eyebrow && <span className="text-[11px] font-medium tracking-[0.08em] text-muted-foreground uppercase">{eyebrow}</span>}
         <h2 className="text-xl font-semibold tracking-tight text-foreground text-balance">{title}</h2>
         {children}
