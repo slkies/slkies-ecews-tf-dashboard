@@ -663,7 +663,10 @@ def test_version_is_public_and_says_which_build_this_is(client):
     assert major.isdigit() and minor.isdigit()
     assert j["label"].startswith(f"v{j['version']}")
     assert isinstance(j["dirty"], bool)
-    assert j["index_sha"] and len(j["index_sha"]) == 12
+    # The hash of the served dashboard; None only where no React build exists
+    # (this test runs against the source tree, not the image).
+    assert "index_sha" in j
+    assert j["index_sha"] is None or len(j["index_sha"]) == 12
 
 
 def test_version_never_reports_app_version_again(client):
@@ -817,3 +820,22 @@ def test_an_admin_cannot_delete_themselves_and_a_viewer_cannot_delete_anyone(
     assert client.delete(f"/api/users/{me['id']}", headers=admin_h).status_code == 400
     uid, _, _ = _make_user(client, admin_h, email="keep@ecews.org")
     assert client.delete(f"/api/users/{uid}", headers=viewer_h).status_code == 403
+
+
+@pytest.mark.parametrize("old", ["/app", "/app/", "/app/index.html", "/app/harness-overview.html"])
+def test_the_old_dashboard_address_sends_everyone_to_the_new_one(client, old):
+    """Version 2.0: the React dashboard is at /. Old links and bookmarks to /app
+    redirect permanently, so browsers update them and nobody lands on a dead page."""
+    r = client.get(old, follow_redirects=False)
+    assert r.status_code == 301 and r.headers["location"] == "/"
+
+
+def test_the_map_boundaries_are_still_served_at_the_root(client):
+    r = client.get("/nga_lga_3states.geojson")
+    assert r.status_code == 200 and r.headers["content-type"].startswith("application/geo+json")
+
+
+def test_the_original_dashboard_is_not_served(client):
+    """Retired in version 2.0: its page and its vendor scripts are gone."""
+    assert client.get("/vendor/chart.umd.min.js").status_code == 404
+    assert client.get("/vendor/fonts.css").status_code == 404

@@ -24,10 +24,8 @@ function boundaryFiles(): Plugin {
   }
 }
 
-// The React app is built into its own directory and served at /app while the
-// existing single-file dashboard keeps serving / unchanged. The live dashboard
-// is in weekly use by state teams; it does not come down for a rewrite. When
-// the React app reaches parity the two swap, and this base becomes '/'.
+// Since version 2.0 (23 Oct 2026) this is the dashboard, served at the site
+// root. The original single-file app is retired, and /app redirects to /.
 export default defineConfig({
   // Tailwind v4 runs as a Vite plugin at build time and emits plain CSS, so it
   // adds no runtime request - the no-external-requests rule is untouched.
@@ -37,7 +35,7 @@ export default defineConfig({
   resolve: {
     alias: { '@': fileURLToPath(new URL('./src', import.meta.url)) },
   },
-  base: '/app/',
+  base: '/',
   build: {
     outDir: '../backend/static_app',
     emptyOutDir: true,

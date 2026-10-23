@@ -111,7 +111,8 @@ or supplied as a bundle, at ECEWS's preference.
 | `backend/app/ingest.py` | Workbook parsing, sheet handling, DQ checks |
 | `backend/app/security.py` | JWT issuing/verification, password hashing |
 | `backend/app/schema.sql` | Complete database schema (idempotent) |
-| `backend/static/index.html` | The entire front end, single file |
+| `frontend/` | The dashboard (React, since version 2.0), built into the image and served at `/` |
+| `backend/static/` | Fonts, logo and map boundaries shared by the dashboard and the backend |
 | `backend/static/*.geojson` | Offline LGA/state boundaries for the map |
 | `backend/scripts/to_parquet.py` | Workbook → Parquet converter (operator tool) |
 | `backend/tests/test_indicators.py` | Unit tests for the indicator logic |

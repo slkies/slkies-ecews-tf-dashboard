@@ -26,7 +26,7 @@ import pandas as pd
 from fastapi import (Depends, FastAPI, File, Form, Header, HTTPException, Query,
                      Request, UploadFile)
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import StreamingResponse
+from fastapi.responses import FileResponse, RedirectResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from psycopg.rows import dict_row
 from psycopg_pool import ConnectionPool
@@ -1716,36 +1716,30 @@ def diagnostics(u: Annotated[dict, Depends(admin)]):
     }
 
 
+_static = Path(__file__).parent.parent / "static"          # shared assets
+_static_app = Path(__file__).parent.parent / "static_app"  # the React build
+
+
 @app.get("/api/version")
 def version():
     """Which build is actually being served.
 
     Deploys that look done and are not have cost this project more time than
-    any bug. The page is served by a static mount, so nothing in it says which
-    version it is, and the only way to tell has been to look at the screen and
-    argue about it. A pull that ran, a container that was restarted without
-    being rebuilt, and a browser holding an old copy all look identical from
-    the outside.
+    any bug. A pull that ran, a container that was restarted without being
+    rebuilt, and a browser holding an old copy all look identical from the
+    outside. This makes it checkable: `commit` is the commit the image was
+    built from (compare it with `git rev-parse --short=7 HEAD`), and
+    `index_sha` is the hash of the dashboard page being served right now, so a
+    stale copy in a browser can be told apart from a stale deploy.
 
-    This makes it checkable. `index_sha` is the hash of the file being served
-    right now; compare it against the same hash computed from the repository:
-
-        curl -s https://<host>/api/version
-        git show <ref>:backend/static/index.html | sha256sum
-
-    Matching hashes mean the deploy is current, whatever the screen shows -
-    at which point the problem is the browser cache, not the deploy. No
-    authentication, and it discloses nothing: a file hash and a timestamp.
+    No authentication, and it discloses nothing: a version, a commit, a file
+    hash and a timestamp.
     """
     import hashlib
-    idx = _static / "index.html"
+    idx = _static_app / "index.html"
     if not idx.exists():
         return {**build_info(), "index_sha": None, "index_modified": None}
-    # Hash with line endings normalised. Git stores LF and checks out CRLF on
-    # Windows, so the same commit yields two different hashes depending on
-    # where it was checked out - which would make this tool accuse a correct
-    # deploy of being stale. Normalising makes the value comparable to
-    # `git show <ref>:backend/static/index.html | sha256sum` anywhere.
+    # Line endings normalised, so the same build hashes the same anywhere.
     raw = idx.read_bytes()
     return {
         **build_info(),
@@ -1756,20 +1750,31 @@ def version():
     }
 
 
-_static = Path(__file__).parent.parent / "static"
+# Version 2.0 (Es, 23 Oct 2026): the React dashboard is the dashboard, at /.
+# The original single-file app is retired and no longer served, so nobody can
+# land on it. Its old address for the React build, /app, redirects permanently
+# to /, so a bookmark or a shared link still arrives and browsers update it.
+@app.get("/app", include_in_schema=False)
+@app.get("/app/{rest:path}", include_in_schema=False)
+def _old_app_address(rest: str = ""):
+    return RedirectResponse("/", status_code=301)
 
-# The React rewrite, served alongside the app it will eventually replace. The
-# live dashboard is in weekly use by state teams and does not come down for a
-# migration, so the two run side by side: the existing single-file app at /,
-# the React build at /app, sharing this API, these fonts and this brand
-# directory. When the React app reaches parity the mounts swap.
-#
-# Mounted BEFORE "/" because mount order is match order - a StaticFiles at "/"
-# would swallow /app and serve it the old index.html.
-_static_app = Path(__file__).parent.parent / "static_app"
+
+# Shared assets the React build references by absolute path: the self-hosted
+# fonts, the logo, and the map boundaries (which the backend also reads, so
+# they stay in backend/static rather than moving into the frontend build).
+# Mounted and routed BEFORE "/" because match order is registration order - a
+# StaticFiles at "/" would otherwise swallow them.
+for _sub in ("vendor", "brand"):
+    if (_static / _sub).exists():
+        app.mount(f"/{_sub}", StaticFiles(directory=_static / _sub), name=f"static_{_sub}")
+
+
+@app.get("/nga_lga_3states.geojson", include_in_schema=False)
+@app.get("/nga_context_states.geojson", include_in_schema=False)
+def _boundaries(request: Request):
+    return FileResponse(_static / request.url.path.lstrip("/"), media_type="application/geo+json")
+
+
 if _static_app.exists():
-    app.mount("/app", StaticFiles(directory=_static_app, html=True),
-              name="static_app")
-
-if _static.exists():
-    app.mount("/", StaticFiles(directory=_static, html=True), name="static")
+    app.mount("/", StaticFiles(directory=_static_app, html=True), name="static_app")

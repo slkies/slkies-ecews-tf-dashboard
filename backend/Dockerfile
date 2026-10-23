@@ -2,11 +2,9 @@
 # the honest way to pay it is to run the build here rather than commit compiled
 # assets to git.
 #
-# The build context is the REPO ROOT (see docker-compose.yml), not backend/,
-# because the frontend sources live outside backend/. The hosted deployments in
-# DEPLOY.md still build with backend/ as their root; they simply produce no
-# static_app, and main.py mounts /app only if it exists, so the live dashboard
-# at / is unaffected either way.
+# The build context is the REPO ROOT (docker-compose.yml, render.yaml and every
+# option in DEPLOY.md), not backend/, because the frontend sources live outside
+# backend/. Since version 2.0 the React build IS the dashboard, served at /.
 
 # ── stage 1: build the React app ──────────────────────────────────────
 FROM node:22-slim AS frontend

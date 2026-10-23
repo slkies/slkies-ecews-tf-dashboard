@@ -40,23 +40,17 @@ function Show-Running {
             -ForegroundColor Yellow
     }
 
-    # The check that actually settles "did my change deploy?". Compare the hash
-    # of the file being served against the same file in the working tree.
-    $idx = Join-Path $repo 'backend\static\index.html'
-    if (Test-Path $idx) {
-        $bytes = [IO.File]::ReadAllBytes($idx)
-        $text = [Text.Encoding]::UTF8.GetString($bytes).Replace("`r`n", "`n")
-        $sha = [BitConverter]::ToString(
-            [Security.Cryptography.SHA256]::Create().ComputeHash(
-                [Text.Encoding]::UTF8.GetBytes($text))).Replace('-', '').ToLower()
-        if ($sha.Substring(0, 12) -eq $v.index_sha) {
-            Write-Host "  the page being served matches your working tree.`n" `
-                -ForegroundColor Green
-        } else {
-            Write-Host "  STALE: the served page is NOT your working tree." `
-                -ForegroundColor Red
-            Write-Host "         working tree: $($sha.Substring(0,12))`n"
-        }
+    # The check that actually settles "did my change deploy?": the commit the
+    # image was built from against the commit checked out here. The dashboard
+    # is a build output, not a file in git, so the commit is what to compare.
+    $head = (git -C $repo rev-parse --short=7 HEAD)
+    if ($v.commit -eq $head) {
+        Write-Host "  the dashboard being served is your checked-out commit.`n" `
+            -ForegroundColor Green
+    } else {
+        Write-Host "  STALE: serving $($v.commit), but $head is checked out." `
+            -ForegroundColor Red
+        Write-Host "         run this script again to rebuild.`n"
     }
 }
 

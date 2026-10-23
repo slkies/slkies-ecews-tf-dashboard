@@ -20,14 +20,11 @@ repo is public. Credentials live in `.env` (gitignored) or the host's secret sto
 
 ## 1. Where things run
 
-**Version 2.0** (23 Oct 2026): the React rebuild is merged into `main`, which IT
-deploys from. One server, one database, two front ends that always show the same
-figures:
-
-| Served at | What | Source |
-|---|---|---|
-| `/app` | The React dashboard, every page rebuilt | `frontend/` |
-| `/` | The original single-file dashboard, unchanged | `backend/static/index.html` |
+**Version 2.0** (23 Oct 2026): the React dashboard is the dashboard, served at
+`/` from `main`, which IT deploys from. The original single-file app is retired
+and no longer served; any old link to `/app` redirects permanently to `/`. Every
+hosted build uses the **repo root** as its context (`DEPLOY.md`), because the
+Dockerfile builds the dashboard from `frontend/`.
 
 Development continues on `react` and is merged into `main` for each release.
 `backend/scripts/bump_version.py` cuts a release: it bumps `app/VERSION`, commits
@@ -57,7 +54,7 @@ docker compose up -d --build        # http://localhost:8080 (compose maps 8080 -
   **186 passing** (23 Oct 2026).
 - **Frontend tests:** `cd frontend && npx vitest run` — **132 passing**. Type check:
   `npx tsc --noEmit`.
-- **Harness pages** (`/app/harness-*.html` on the Vite dev server) render each page
+- **Harness pages** (`/harness-*.html` on the Vite dev server) render each page
   with synthetic data and no backend, for checking in a real browser without
   signing in.
 
@@ -66,7 +63,7 @@ Admin → Line lists → load the de-identified parquet zip. **Set the line-list
 the treatment line list's date**: it sets the fiscal quarter and the follow-up
 windows.
 
-## 3. Pages (React, `/app`)
+## 3. Pages
 
 | Page | What it shows |
 |---|---|
@@ -160,13 +157,13 @@ Previous snapshot: 14 Aug 2026 (4,228 episodes). Line list changes compares the 
 ├── docs/RUNBOOK_pipeline.md          ← the weekly de-identification routine
 ├── docker-compose.yml, .env.example, DEPLOY.md
 ├── backend/
-│   ├── Dockerfile                    ← builds frontend/ in a first stage, serves it at /app
+│   ├── Dockerfile                    ← builds frontend/ in a first stage; the dashboard at /
 │   ├── app/indicators.py             ← the indicator engine (cohort, cascade, flags, models)
 │   ├── app/main.py                   ← FastAPI routes, auth, audit, exports
 │   ├── app/ingest.py, schema.sql, security.py
 │   ├── scripts/deidentify.py, weekly.ps1, deploy.ps1, inspect_export.py, diagnose_key.py
-│   └── static/index.html             ← the original single-file dashboard (served at /)
-└── frontend/                         ← React 19 + Vite + Tailwind v4 + shadcn (Base UI)
+│   └── static/                       ← fonts, logo and map boundaries (the backend reads the maps too)
+└── frontend/                         ← the dashboard: React 19 + Vite + Tailwind v4 + shadcn (Base UI)
     ├── src/pages/                    ← one file per page, each with a test
     ├── src/components/, src/core/    ← shared UI, API client, filters, palette, theme
     ├── src/dev/                      ← synthetic fixtures and harness pages
@@ -176,17 +173,15 @@ Previous snapshot: 14 Aug 2026 (4,228 episodes). Line list changes compares the 
 ## 7. Pending
 
 **Build**
-1. **Which dashboard opens at `/`.** Today the original; the React one is at `/app`.
-   Es to decide whether `/` should open the React dashboard.
-2. **Deep dive: a box plot of the wait for a follow-up VL.** How long clients wait
+1. **Deep dive: a box plot of the wait for a follow-up VL.** How long clients wait
    between the index result and their repeat sample: median, middle half and range,
    so a few very long waits do not hide the typical one. Built in August and
    withdrawn because the data under it was empty at the time; the data is now there.
    Optional.
-3. **EAC uptake by month** — withdrawn. If rebuilt, recent months must be marked
+2. **EAC uptake by month** — withdrawn. If rebuilt, recent months must be marked
    provisional: uptake in a young month is low because commencing takes a median of
    25 days, not because teams stopped.
-4. **Per-client hover timeline** (ART start, every VL, regimen changes, interruptions,
+3. **Per-client hover timeline** (ART start, every VL, regimen changes, interruptions,
    missed appointments on one date axis) — waits for the drug, VL history and
    appointment file (Es to locate).
 

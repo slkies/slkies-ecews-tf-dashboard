@@ -4,13 +4,12 @@ The app is one Docker web service (FastAPI serving the SPA + API) plus a Postgre
 database. HTTPS is required — the login sends passwords, so never expose it over
 plain HTTP.
 
-> **Build context changed (12 Sep 2026).** The Dockerfile now builds the React
-> app in a first stage, so `docker-compose` builds from the **repo root** with
-> `dockerfile: backend/Dockerfile`. The hosted options below still use
-> `backend/` as their root directory and therefore produce no React build —
-> `main.py` mounts `/app` only if it exists, so the live dashboard at `/` is
-> unaffected. When the React app replaces it, those root directories change to
-> the repo root.
+> **Version 2.0 (23 Oct 2026): build from the repo root.** The dashboard is the
+> React app, built in the Dockerfile's first stage from `frontend/`. Every option
+> below therefore builds with the **repo root** as its context and
+> `backend/Dockerfile` as the Dockerfile. A build rooted at `backend/` cannot see
+> `frontend/` and fails. The original single-file dashboard is retired; `/app`
+> redirects to `/`.
 
 ## Versions, and knowing which build is live
 
@@ -89,23 +88,24 @@ says what changed between two of them.
 3. When prompted, set **ADMIN_PASSWORD** and **VIEWER_PASSWORD** (JWT_SECRET and
    DATABASE_URL are handled automatically).
 4. First boot seeds `admin@ecews.org` and `viewer@ecews.org` and runs the schema.
-5. Open the URL, sign in as admin, go to **Admin → Upload** the Parquet zip
-   (line-list date 2026-07-11) — the DB starts empty until you upload.
-6. Add teammates on **Admin → Users & access**.
+5. Open the URL, sign in as admin, go to **Admin → Line lists** and load the
+   Parquet zip with the treatment line list's date — the DB starts empty until
+   you upload.
+6. Add teammates on **Admin → Users and access**.
 
 Notes: Render `free` web spins down after ~15 min idle (first hit is slow); use
 `starter` to stay warm. Free Postgres expires after 90 days.
 
 ## Option B — Railway (step by step)
 
-The Dockerfile lives in `backend/`, so Railway must build with **`backend/` as the
-service root** (dashboard) or by running `railway up` from inside `backend/` (CLI).
+Railway builds from the **repo root** and must be told where the Dockerfile is,
+because it is in `backend/`: set the variable `RAILWAY_DOCKERFILE_PATH=backend/Dockerfile`.
 
 **Dashboard (most reliable):**
 1. Push this repo to GitHub (private).
 2. railway.app → **New Project → Deploy from GitHub repo** → pick it.
-3. On the created service → **Settings → Root Directory = `backend`** (so it builds
-   `backend/Dockerfile`, not the repo root).
+3. On the created service → **Settings → Root Directory**: leave empty (the repo
+   root), and add the variable `RAILWAY_DOCKERFILE_PATH` = `backend/Dockerfile`.
 4. Project → **New → Database → PostgreSQL**.
 5. Web service → **Variables** → add:
    - `DATABASE_URL` = `${{Postgres.DATABASE_URL}}`  (reference to the DB)
@@ -114,17 +114,17 @@ service root** (dashboard) or by running `railway up` from inside `backend/` (CL
    - `VIEWER_PASSWORD` = strong value
    (`PORT` is injected automatically; the Dockerfile binds to it.)
 6. Web service → **Settings → Networking → Generate Domain** (HTTPS).
-7. Open the domain → sign in as admin → **Admin → Upload** the Parquet zip
-   (line-list date 2026-07-11). The DB is empty until you upload.
-8. Add teammates on **Admin → Users & access**.
+7. Open the domain → sign in as admin → **Admin → Line lists** → load the Parquet
+   zip with the treatment line list's date. The DB is empty until you upload.
+8. Add teammates on **Admin → Users and access**.
 
 **CLI shortcut** (if `railway` is on PATH; install via `npm i -g @railway/cli`):
 `railway login` → `railway init` (from repo root) → `railway add --database postgres`
-→ `cd backend && railway up` → set the four variables (dashboard is easiest for the
+→ `railway up` from the repo root (with `RAILWAY_DOCKERFILE_PATH` set) → set the four variables (dashboard is easiest for the
 `${{Postgres.DATABASE_URL}}` reference) → `railway domain`.
 
 ## Option C — Fly.io
-- `fly launch` in `backend/` (uses the Dockerfile), `fly postgres create` then
+- `fly launch --dockerfile backend/Dockerfile` from the repo root, `fly postgres create` then
   `fly postgres attach` to set `DATABASE_URL`, and
   `fly secrets set JWT_SECRET=… ADMIN_PASSWORD=… VIEWER_PASSWORD=…`.
 
