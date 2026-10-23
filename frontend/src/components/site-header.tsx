@@ -1,6 +1,7 @@
 import { KeyRound, LogOut, MessageSquare, Moon, Sun } from 'lucide-react'
 import { useState } from 'react'
 import { ChangePasswordDialog, FeedbackDialog } from '@/components/account-dialogs'
+import { DataNotices } from '@/components/data-notices'
 import { Avatar, AvatarFallback } from '@/components/ui/avatar'
 import { Button } from '@/components/ui/button'
 import {
@@ -21,7 +22,7 @@ function initialsOf(s: string): string {
  * Sticky, translucent, and out of the way: content scrolls beneath it rather
  * than being covered by it.
  */
-export function SiteHeader({ title }: { title: string }) {
+export function SiteHeader({ title, onOpenDq }: { title: string; onOpenDq?: () => void }) {
   const { me, signOut } = useSession()
   const { theme, toggle } = useTheme()
   const display = me?.name || me?.username || me?.email || ''
@@ -39,6 +40,7 @@ export function SiteHeader({ title }: { title: string }) {
       </div>
 
       <div className="ml-auto flex items-center gap-1">
+        <DataNotices onOpenDq={onOpenDq} />
         <Button variant="ghost" size="icon" onClick={toggle}
                 aria-label={theme === 'dark' ? 'Switch to light theme' : 'Switch to dark theme'}>
           {theme === 'dark' ? <Sun /> : <Moon />}

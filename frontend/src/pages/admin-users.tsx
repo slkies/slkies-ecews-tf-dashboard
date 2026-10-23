@@ -1,7 +1,6 @@
 import { KeyRound, Trash2, UserPlus, Wand2 } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { SortHead, useSort } from '@/components/sortable'
-import { StatusBadge } from '@/components/status-badge'
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription,
@@ -72,6 +71,19 @@ function Pick({ label, value, items, onChange, disabled, className }: {
   )
 }
 
+type AccessPatch = Partial<Pick<User, 'role' | 'scope_state' | 'scope_facility'>>
+
+/**
+ * What one dropdown change sends: the account's whole access, with the change
+ * applied, so a role change cannot quietly reset a scope. A new state clears
+ * the facility, which may not be in it.
+ */
+export function accessPayload(u: User, patch: AccessPatch) {
+  const next = { role: u.role, scope_state: u.scope_state ?? 'All', scope_facility: u.scope_facility ?? 'All', ...patch }
+  if (patch.scope_state !== undefined) next.scope_facility = 'All'
+  return next
+}
+
 export default function UsersPanel() {
   const { me } = useSession()
   const [users, setUsers] = useState<User[] | null>(null)
@@ -89,12 +101,9 @@ export default function UsersPanel() {
 
   // Role and scope are sent together, so one control cannot quietly undo what
   // another just set. On a refusal the table reloads to what the server holds.
-  async function setAccess(u: User, patch: Partial<Pick<User, 'role' | 'scope_state' | 'scope_facility'>>) {
-    const next = { role: u.role, scope_state: u.scope_state ?? 'All', scope_facility: u.scope_facility ?? 'All', ...patch }
-    // A new state clears a facility that is not in it.
-    if (patch.scope_state !== undefined) next.scope_facility = 'All'
+  async function setAccess(u: User, patch: AccessPatch) {
     try {
-      await api(`/users/${u.id}/access`, { method: 'POST', body: JSON.stringify(next) })
+      await api(`/users/${u.id}/access`, { method: 'POST', body: JSON.stringify(accessPayload(u, patch)) })
       setNote(`${u.username ?? u.email}: access updated.`); setErr(null)
     } catch (e) {
       setErr(e instanceof Error ? e.message : 'Could not change access'); setNote(null)
@@ -137,12 +146,9 @@ export default function UsersPanel() {
               <TableHeader className="bg-muted/50">
                 <TableRow className="hover:bg-transparent">
                   <SortHead label="Name" k="name" sort={sort} onSort={sortBy} text />
-                  <SortHead label="Username" k="username" sort={sort} onSort={sortBy} text />
-                  <SortHead label="Email" k="email" sort={sort} onSort={sortBy} text />
                   <SortHead label="Role" k="role" sort={sort} onSort={sortBy} text />
                   <SortHead label="State" k="scope_state" sort={sort} onSort={sortBy} text />
                   <SortHead label="Facility" k="scope_facility" sort={sort} onSort={sortBy} text />
-                  <SortHead label="Status" k="is_active" sort={sort} onSort={sortBy} />
                   <TableHead className="text-right">Actions</TableHead>
                 </TableRow>
               </TableHeader>
@@ -179,34 +185,38 @@ export default function UsersPanel() {
 
 function UserRow({ u, self, onAccess, onToggle, onReset, onDelete }: {
   u: User; self: boolean
-  onAccess: (u: User, p: Partial<Pick<User, 'role' | 'scope_state' | 'scope_facility'>>) => void
+  onAccess: (u: User, p: AccessPatch) => void
   onToggle: (u: User) => void; onReset: (u: User) => void; onDelete: (u: User) => void
 }) {
   const { states, facilities } = useScopeChoices(u.scope_state)
   const name = u.full_name ?? u.username ?? u.email
   return (
     <TableRow className={u.is_active ? undefined : 'text-muted-foreground'}>
-      <TableCell className="font-medium">{name}{self && <span className="ml-1.5 text-muted-foreground">(you)</span>}</TableCell>
-      <TableCell className="font-mono">{u.username ?? DASH}</TableCell>
-      <TableCell>{u.email}</TableCell>
+      {/* Username and email under the name: as separate columns the table
+          was too wide for a laptop and the actions fell off the right. */}
+      <TableCell>
+        <span className="flex flex-col">
+          <span className="font-medium">{name}{self && <span className="ml-1.5 font-normal text-muted-foreground">(you)</span>}{!u.is_active && <span className="ml-1.5 font-normal text-muted-foreground">(disabled)</span>}</span>
+          <span className="block max-w-52 truncate text-muted-foreground" title={u.email}>{u.username ?? DASH} · {u.email}</span>
+        </span>
+      </TableCell>
       {/* Your own row is read-only: the server refuses a change to your own
           role, so a control that always fails is worse than none. */}
-      <TableCell className="min-w-28">
+      <TableCell className="w-28">
         {self ? <span className="capitalize">{u.role}</span>
               : <Pick label={`Role for ${name}`} value={u.role} items={ROLES} onChange={(v) => onAccess(u, { role: v as User['role'] })} />}
       </TableCell>
-      <TableCell className="min-w-32">
+      <TableCell className="w-28">
         {self ? u.scope_state ?? 'All states'
               : <Pick label={`State for ${name}`} value={u.scope_state ?? 'All'} items={states} onChange={(v) => onAccess(u, { scope_state: v })} />}
       </TableCell>
-      <TableCell className="min-w-40 max-w-56">
+      <TableCell className="w-36 max-w-36">
         {self ? u.scope_facility ?? 'All facilities'
               : <Pick label={`Facility for ${name}`} value={u.scope_facility ?? 'All'} items={facilities} onChange={(v) => onAccess(u, { scope_facility: v })} />}
       </TableCell>
-      <TableCell>{u.is_active ? <StatusBadge tone="good">Active</StatusBadge> : <span>Disabled</span>}</TableCell>
       <TableCell>
         <span className="flex justify-end gap-1.5 whitespace-nowrap">
-          <Button variant="outline" size="sm" onClick={() => onReset(u)} aria-label={`Reset the password for ${name}`}><KeyRound />Password</Button>
+          <Button variant="outline" size="icon-sm" onClick={() => onReset(u)} aria-label={`Reset the password for ${name}`} title="Reset password"><KeyRound /></Button>
           {!self && <Button variant="outline" size="sm" onClick={() => onToggle(u)}>{u.is_active ? 'Disable' : 'Enable'}</Button>}
           {!self && <Button variant="ghost" size="icon-sm" onClick={() => onDelete(u)} aria-label={`Delete ${name}`}><Trash2 className="text-bad" /></Button>}
         </span>

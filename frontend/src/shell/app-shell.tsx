@@ -76,7 +76,7 @@ export default function AppShell() {
                   asof={fmtDate(summary?.as_of)} episodes={fmt(summary?.n)}
                   clients={fmt(summary?.clients)} />
       <SidebarInset>
-        <SiteHeader title={label} />
+        <SiteHeader title={label} onOpenDq={() => navigate('dq')} />
         <div className="mx-auto flex w-full max-w-[1440px] flex-1 flex-col gap-6 p-4 lg:p-6">
           {err && (
             <Alert variant="destructive">
