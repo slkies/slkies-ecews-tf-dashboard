@@ -1029,6 +1029,39 @@ def toggle_user(uid: int, u: Annotated[dict, Depends(admin)], request: Request):
     return {"ok": True}
 
 
+@app.delete("/api/users/{uid}")
+def delete_user(uid: int, u: Annotated[dict, Depends(admin)], request: Request):
+    """
+    Remove an account for good, e.g. staff who have left the project.
+
+    Disabling (PATCH above) is the reversible option and keeps the account; this
+    is for when the account should not exist at all. What the person did is
+    kept: audit rows and feedback carry the email themselves, so their user_id
+    is cleared rather than the rows deleted, and an upload keeps its record with
+    no uploader. Their usage rows go with the account (ON DELETE CASCADE).
+    """
+    if uid == u["id"]:
+        raise HTTPException(400, "You cannot delete your own account. Ask another admin.")
+    with pool.connection() as c:
+        r = c.execute("SELECT username, email, role, is_active FROM users WHERE id=%s",
+                      (uid,)).fetchone()
+        if not r:
+            raise HTTPException(404, "User not found.")
+        if r["role"] == "admin" and r["is_active"]:
+            n = c.execute("SELECT count(*) AS n FROM users WHERE role='admin' "
+                          "AND is_active").fetchone()["n"]
+            if n <= 1:
+                raise HTTPException(400, "That is the only active admin. Promote "
+                                         "someone else first.")
+        c.execute("UPDATE audit_log SET user_id=NULL WHERE user_id=%s", (uid,))
+        c.execute("UPDATE feedback SET user_id=NULL WHERE user_id=%s", (uid,))
+        c.execute("UPDATE uploads SET uploaded_by=NULL WHERE uploaded_by=%s", (uid,))
+        c.execute("DELETE FROM users WHERE id=%s", (uid,))
+    _audit("user.delete", user_id=u["id"], email=u["email"], request=request,
+           detail=f"deleted {r['username'] or r['email']} <{r['email']}> role={r['role']}")
+    return {"ok": True}
+
+
 @app.post("/api/users/{uid}/access")
 def set_access(uid: int, body: AccessPatch, request: Request,
                u: Annotated[dict, Depends(admin)]):

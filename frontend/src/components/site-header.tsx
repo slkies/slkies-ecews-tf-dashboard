@@ -1,4 +1,6 @@
-import { LogOut, Moon, Sun } from 'lucide-react'
+import { KeyRound, LogOut, MessageSquare, Moon, Sun } from 'lucide-react'
+import { useState } from 'react'
+import { ChangePasswordDialog, FeedbackDialog } from '@/components/account-dialogs'
 import { Avatar, AvatarFallback } from '@/components/ui/avatar'
 import { Button } from '@/components/ui/button'
 import {
@@ -23,6 +25,7 @@ export function SiteHeader({ title }: { title: string }) {
   const { me, signOut } = useSession()
   const { theme, toggle } = useTheme()
   const display = me?.name || me?.username || me?.email || ''
+  const [dialog, setDialog] = useState<'password' | 'feedback' | null>(null)
 
   return (
     <header className="sticky top-0 z-30 flex h-16 shrink-0 items-center gap-2 border-b bg-background/80 px-4 backdrop-blur-md lg:px-6">
@@ -60,6 +63,15 @@ export function SiteHeader({ title }: { title: string }) {
               </DropdownMenuLabel>
             </DropdownMenuGroup>
             <DropdownMenuSeparator />
+            <DropdownMenuItem onClick={() => setDialog('password')}>
+              <KeyRound />
+              Change password
+            </DropdownMenuItem>
+            <DropdownMenuItem onClick={() => setDialog('feedback')}>
+              <MessageSquare />
+              Send feedback
+            </DropdownMenuItem>
+            <DropdownMenuSeparator />
             <DropdownMenuItem onClick={signOut}>
               <LogOut />
               Sign out
@@ -67,6 +79,8 @@ export function SiteHeader({ title }: { title: string }) {
           </DropdownMenuContent>
         </DropdownMenu>
       </div>
+      <ChangePasswordDialog open={dialog === 'password'} onOpenChange={(o) => setDialog(o ? 'password' : null)} />
+      <FeedbackDialog open={dialog === 'feedback'} onOpenChange={(o) => setDialog(o ? 'feedback' : null)} page={title} />
     </header>
   )
 }

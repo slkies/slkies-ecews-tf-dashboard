@@ -777,3 +777,43 @@ def test_reading_the_risk_list_is_recorded_when_it_returns_clients(client, admin
     rows = client.get("/api/audit?action=clients.view", headers=admin_h).json()["rows"]
     noted = any("risk_lowest_chance" in x["detail"] for x in rows)
     assert noted == bool(r.get("lowest_chance"))
+
+
+def test_an_admin_can_promote_a_viewer_and_it_takes_effect_at_once(client, admin_h):
+    uid, email, pw = _make_user(client, admin_h, email="promo@ecews.org")
+    h = hdr(client, (email, pw))
+    assert client.get("/api/me", headers=h).json()["role"] == "viewer"
+    r = client.post(f"/api/users/{uid}/access", headers=admin_h, json={"role": "analyst"})
+    assert r.status_code == 200 and r.json()["role"] == "analyst"
+    # the same session, no sign-in again
+    assert client.get("/api/me", headers=h).json()["role"] == "analyst"
+
+
+def test_an_admin_cannot_change_their_own_role(client, admin_h):
+    me = next(x for x in client.get("/api/users", headers=admin_h).json()
+              if x["role"] == "admin")
+    assert client.post(f"/api/users/{me['id']}/access", headers=admin_h,
+                       json={"role": "viewer"}).status_code == 400
+
+
+def test_deleting_an_account_ends_access_but_keeps_its_history(client, admin_h):
+    uid, email, pw = _make_user(client, admin_h, email="leaver@ecews.org")
+    h = hdr(client, (email, pw))
+    assert client.post("/api/feedback", headers=h, json={"message": "hi", "page": "x"}).status_code == 200
+    assert client.delete(f"/api/users/{uid}", headers=admin_h).status_code == 200
+    assert client.get("/api/me", headers=h).status_code == 401
+    assert client.post("/api/login", json={"email": email, "password": pw}).status_code == 401
+    assert all(x["id"] != uid for x in client.get("/api/users", headers=admin_h).json())
+    # what they did is still on record, under their email
+    assert any(f["email"] == email for f in client.get("/api/feedback", headers=admin_h).json())
+    rows = client.get("/api/audit?action=user.delete", headers=admin_h).json()["rows"]
+    assert rows and email in rows[0]["detail"]
+
+
+def test_an_admin_cannot_delete_themselves_and_a_viewer_cannot_delete_anyone(
+        client, admin_h, viewer_h):
+    me = next(x for x in client.get("/api/users", headers=admin_h).json()
+              if x["role"] == "admin")
+    assert client.delete(f"/api/users/{me['id']}", headers=admin_h).status_code == 400
+    uid, _, _ = _make_user(client, admin_h, email="keep@ecews.org")
+    assert client.delete(f"/api/users/{uid}", headers=viewer_h).status_code == 403

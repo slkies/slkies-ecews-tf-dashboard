@@ -11,15 +11,20 @@ import {
 import { SidebarInset, SidebarProvider } from '@/components/ui/sidebar'
 import { api } from '@/core/api'
 import { useFilters } from '@/core/filters'
+import { useSession } from '@/core/session'
 import { fmt, fmtDate } from '@/core/format'
 import type { Overview as Ov, TimeMetrics } from '@/core/overview'
 import type { Summary } from '@/core/types'
 import { useTrend } from '@/core/use-trend'
+import AdminPage from '@/pages/admin-page'
 import AdvancedPage from '@/pages/advanced-page'
 import CascadePage from '@/pages/cascade-page'
 import ComparePage from '@/pages/compare-page'
+import DataQualityPage from '@/pages/data-quality-page'
 import DeepDivePage from '@/pages/deep-dive-page'
 import DtcPage from '@/pages/dtc-page'
+import GuidelinesPage from '@/pages/guidelines-page'
+import MethodologyPage from '@/pages/methodology-page'
 import TimeMetricsPage from '@/pages/time-metrics-page'
 import OverviewPage from '@/pages/overview-page'
 import PlansPage from '@/pages/plans-page'
@@ -28,6 +33,7 @@ import { NAV } from './nav'
 
 export default function AppShell() {
   const { query, options } = useFilters()
+  const { me } = useSession()
   const [view, setView] = useState('overview')
   // Which worklist to open when arriving from another page (a cascade step).
   const [worklistFlag, setWorklistFlag] = useState<string | null>(null)
@@ -102,6 +108,22 @@ export default function AppShell() {
           ) : view === 'adv' ? (
             <ErrorBoundary name="Advanced analytics">
               <AdvancedPage />
+            </ErrorBoundary>
+          ) : view === 'dq' ? (
+            <ErrorBoundary name="Data quality">
+              <DataQualityPage />
+            </ErrorBoundary>
+          ) : view === 'guide' ? (
+            <ErrorBoundary name="Guidelines">
+              <GuidelinesPage />
+            </ErrorBoundary>
+          ) : view === 'method' ? (
+            <ErrorBoundary name="Methodology">
+              <MethodologyPage />
+            </ErrorBoundary>
+          ) : view === 'admin' && me?.role === 'admin' ? (
+            <ErrorBoundary name="Admin">
+              <AdminPage />
             </ErrorBoundary>
           ) : view === 'time' ? (
             <ErrorBoundary name="Time metrics">
