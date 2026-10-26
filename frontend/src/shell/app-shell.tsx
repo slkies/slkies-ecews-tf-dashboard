@@ -1,6 +1,7 @@
 import { CircleAlert, Hammer } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { AppSidebar } from '@/components/app-sidebar'
+import { ClientRecordProvider } from '@/components/client-record'
 import ErrorBoundary from '@/components/error-boundary'
 import { SiteHeader } from '@/components/site-header'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
@@ -19,6 +20,7 @@ import { useTrend } from '@/core/use-trend'
 import AdminPage from '@/pages/admin-page'
 import AdvancedPage from '@/pages/advanced-page'
 import CascadePage from '@/pages/cascade-page'
+import ClientSearchPage from '@/pages/client-search-page'
 import ComparePage from '@/pages/compare-page'
 import DataQualityPage from '@/pages/data-quality-page'
 import DeepDivePage from '@/pages/deep-dive-page'
@@ -71,6 +73,7 @@ export default function AppShell() {
   const label = NAV.find((n) => n.id === view)?.label ?? 'Overview'
 
   return (
+    <ClientRecordProvider>
     <SidebarProvider>
       <AppSidebar view={view} onNavigate={navigate}
                   asof={fmtDate(summary?.as_of)} episodes={fmt(summary?.n)}
@@ -100,6 +103,10 @@ export default function AppShell() {
           ) : view === 'compare' ? (
             <ErrorBoundary name="Line list changes">
               <ComparePage />
+            </ErrorBoundary>
+          ) : view === 'search' ? (
+            <ErrorBoundary name="Client search">
+              <ClientSearchPage />
             </ErrorBoundary>
           ) : view === 'plans' ? (
             <ErrorBoundary name="Treatment plans">
@@ -141,6 +148,7 @@ export default function AppShell() {
         </div>
       </SidebarInset>
     </SidebarProvider>
+    </ClientRecordProvider>
   )
 }
 

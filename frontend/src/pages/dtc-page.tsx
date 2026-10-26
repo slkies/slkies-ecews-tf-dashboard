@@ -1,3 +1,4 @@
+import { ClientKey } from '@/components/client-record'
 import { createColumnHelper } from '@tanstack/react-table'
 import { ArrowRight, Stethoscope } from 'lucide-react'
 import { Fragment, useEffect, useMemo, useState } from 'react'
@@ -190,7 +191,7 @@ function useTrajectoryColumns() {
     col.accessor('sn', {
       header: 'Client',
       cell: ({ getValue }) => (
-        <span className="font-mono text-muted-foreground" title={getValue()}>{String(getValue()).slice(0, 10)}…</span>
+        <ClientKey sn={String(getValue())} />
       ),
       enableSorting: false, enableHiding: false,
     }),

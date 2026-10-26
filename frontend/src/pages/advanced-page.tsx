@@ -3,6 +3,7 @@ import { Gauge, HeartPulse, Percent, Sigma, Users } from 'lucide-react'
 import { useEffect, useMemo, useState } from 'react'
 import { cn } from 'cn'
 import Chart from '@/components/Chart'
+import { ClientKey } from '@/components/client-record'
 import FilterBar, { PinFiltersToggle } from '@/components/filter-bar'
 import { KpiTile } from '@/components/kpi-tile'
 import { SortHead, useSort } from '@/components/sortable'
@@ -430,7 +431,7 @@ function LowestChance({ rows }: { rows: NonNullable<Risk['lowest_chance']> }) {
                   return (
                     <TableRow key={r.sn}>
                       {/* S/N is a pseudonymous key, shortened for width as on the worklists. */}
-                      <TableCell className="font-mono text-muted-foreground" title={r.sn}>{r.sn.slice(0, 10)}…</TableCell>
+                      <TableCell><ClientKey sn={r.sn} /></TableCell>
                       <TableCell className="max-w-[14rem] truncate" title={r.facility ?? undefined}>{r.facility ?? DASH}</TableCell>
                       <TableCell className="text-right tabular-nums">{r.age ?? DASH}</TableCell>
                       <TableCell className="text-right tabular-nums">{fmt(r.idx_vl)}</TableCell>

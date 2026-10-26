@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { cn } from 'cn'
 import { DataTable, SortableHeader } from '@/components/data-table/data-table'
 import type { DataTableFeatures } from '@/components/data-table/data-table-features'
+import { ClientKey } from '@/components/client-record'
 import FilterBar, { PinFiltersToggle } from '@/components/filter-bar'
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
@@ -143,12 +144,9 @@ function useColumns() {
     }),
     col.accessor('sn', {
       header: ({ column }) => <SortableHeader column={column} title="Client" />,
-      // S/N is a pseudonymous key. Shortened for width; the full key is on hover.
-      cell: ({ getValue }) => (
-        <span className="font-mono text-xs text-muted-foreground" title={getValue()}>
-          {String(getValue()).slice(0, 10)}…
-        </span>
-      ),
+      // S/N is a pseudonymous key. Shortened for width, full on hover; it opens
+      // the client's record.
+      cell: ({ getValue }) => <ClientKey sn={String(getValue())} />,
       enableHiding: false,
     }),
     col.accessor('facility', {

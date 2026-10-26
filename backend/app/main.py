@@ -754,6 +754,113 @@ def get_clients(u: U, f: F, request: Request, flag: str | None = Query(None),
     return [] if df.empty else _json_safe(df)
 
 
+# ── one client (facility review) ──────────────────────────────────────
+# Facility staff reviewing entries need to trace one client, not a list. The
+# dashboard holds no PEPID (the S/N to PEPID link stays in the vault), so a
+# client is found by S/N, or by details the dashboard already shows. Both
+# endpoints search the whole current snapshot within the user's scope - the
+# page filters do not apply - and both are audited like opening a worklist.
+_SN_MIN = 4             # a shorter fragment matches too many clients to be a lookup
+_SEARCH_LIMIT = 50
+
+_RECORD_CLIENT = ["sn", "state", "lga", "facility", "sex", "age", "art_status",
+                  "regimen_line", "regimen", "art_year", "exit_date",
+                  "first_vl", "first_vl_date", "first_high_vl", "first_high_date"]
+_RECORD_EPISODE = ["episode", "idx_vl", "idx_samp", "recv_date", "idx_date",
+                   "fy_quarter", "s1_date", "eac1", "eac2", "eac3", "eac_extended",
+                   "eac_completed", "sessions", "post_eac_vl", "fu_samp", "fu_date",
+                   "fu_vl", "awaiting_result", "resuppressed", "llv",
+                   "still_unsuppressed", "switched", "months_unsuppressed",
+                   "treatment_plan"]
+
+
+@app.get("/api/client-search")
+def client_search(u: U, request: Request,
+                  q: str | None = Query(None, max_length=40),
+                  facility: str | None = None, sex: str | None = None,
+                  age_min: int | None = None, age_max: int | None = None,
+                  idx_from: dt.date | None = None, idx_to: dt.date | None = None,
+                  vl_min: float | None = None, vl_max: float | None = None):
+    """Clients matching an S/N fragment, or a facility plus at least one detail.
+
+    One row per client (a client can have several episodes), latest episode
+    first. Requiring a narrowing detail means this finds a client rather than
+    browsing everyone: the worklists are the place for lists.
+    """
+    q = (q or "").strip()
+    details = [sex, age_min, age_max, idx_from, idx_to, vl_min, vl_max]
+    if q and len(q) < _SN_MIN:
+        raise HTTPException(400, f"Type at least {_SN_MIN} characters of the S/N.")
+    if not q and not (facility and any(v is not None and v != "" for v in details)):
+        raise HTTPException(400, "Enter an S/N, or choose a facility and at least "
+                                 "one other detail.")
+    df = _load(u, Filters())
+    if not df.empty:
+        m = pd.Series(True, index=df.index)
+        if q:
+            m &= df["sn"].astype("string").str.contains(q, regex=False, na=False)
+        if facility:
+            m &= df["facility"].eq(facility)
+        if sex:
+            m &= df["sex"].astype("string").str.casefold().eq(sex.casefold())
+        age = pd.to_numeric(df["age"], errors="coerce")
+        if age_min is not None:
+            m &= age.ge(age_min)
+        if age_max is not None:
+            m &= age.le(age_max)
+        recv = pd.to_datetime(df["recv_date"].fillna(df["idx_date"]), errors="coerce")
+        if idx_from:
+            m &= recv.ge(pd.Timestamp(idx_from))
+        if idx_to:
+            m &= recv.le(pd.Timestamp(idx_to))
+        vl = pd.to_numeric(df["idx_vl"], errors="coerce")
+        if vl_min is not None:
+            m &= vl.ge(vl_min)
+        if vl_max is not None:
+            m &= vl.le(vl_max)
+        df = df[m.fillna(False)]
+    if df.empty:
+        rows, n = [], 0
+    else:
+        df = df.assign(_recv=pd.to_datetime(df["recv_date"].fillna(df["idx_date"]),
+                                            errors="coerce"))
+        latest = df.sort_values("_recv", ascending=False).drop_duplicates("sn")
+        latest = latest.assign(episodes=latest["sn"].map(df["sn"].value_counts()))
+        n = len(latest)
+        rows = _json_safe(latest[["sn", "facility", "state", "sex", "age", "art_status",
+                                  "idx_vl", "recv_date", "idx_date", "episodes"]]
+                          .head(_SEARCH_LIMIT))
+    crit = ", ".join(f"{k}={v}" for k, v in
+                     [("sn~", q), ("facility", facility), ("sex", sex),
+                      ("age_min", age_min), ("age_max", age_max), ("idx_from", idx_from),
+                      ("idx_to", idx_to), ("vl_min", vl_min), ("vl_max", vl_max)]
+                     if v not in (None, ""))
+    _audit("clients.search", user_id=u["id"], email=u["email"], request=request,
+           detail=f"{n} clients matched; {crit}")
+    return {"n": n, "shown": len(rows), "limit": _SEARCH_LIMIT, "clients": rows}
+
+
+@app.get("/api/client/{sn}")
+def client_record(sn: str, u: U, request: Request):
+    """Everything the dashboard holds on one client: every failure episode,
+    newest first, each with the worklists it is on. Out of scope and unknown
+    read the same, so the answer never says whether a client exists elsewhere."""
+    df = _load(u, Filters())
+    df = df[df["sn"].astype("string").eq(sn)] if not df.empty else df
+    if df.empty:
+        raise HTTPException(404, "No client with that S/N in your area.")
+    df = df.assign(_recv=pd.to_datetime(df["recv_date"].fillna(df["idx_date"]),
+                                        errors="coerce")).sort_values("_recv", ascending=False)
+    eps = _json_safe(df[[c for c in _RECORD_EPISODE if c in df.columns]])
+    for e, (_, row) in zip(eps, df.iterrows()):
+        one = df.loc[[row.name]]
+        e["worklists"] = [k for k in FLAGS if bool(_flag_mask(one, k).iloc[0])]
+    client = _json_safe(df.iloc[[0]][[c for c in _RECORD_CLIENT if c in df.columns]])[0]
+    _audit("clients.view", user_id=u["id"], email=u["email"], request=request,
+           detail=f"client record: 1 client, {len(eps)} episode(s)")
+    return {**client, "episodes": eps}
+
+
 @app.get("/api/worklists")
 def worklist_counts(u: U, f: F):
     """How many episodes each worklist holds, under the current filters.
