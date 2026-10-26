@@ -7,7 +7,7 @@
 import { render, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { ClientKey, ClientRecordProvider } from '@/components/client-record'
+import { ClientKey, ClientRecordPage, ClientRecordProvider } from '@/components/client-record'
 import { FilterProvider } from '@/core/filters'
 import { SessionProvider } from '@/core/session'
 import { MATCHES, RECORD } from '@/dev/client-fixture'
@@ -106,3 +106,23 @@ describe('Client record', () => {
   })
 })
 
+describe('Client record as a page', () => {
+  it('shows the record full width with a way back to where you came from', async () => {
+    mock()
+    let back = 0
+    render(<SessionProvider><ClientRecordPage sn={RECORD.sn} backLabel="Worklists" onBack={() => { back += 1 }} /></SessionProvider>)
+    expect(await screen.findByRole('region', { name: 'Episode 2' })).toBeInTheDocument()
+    expect(screen.queryByRole('dialog')).toBeNull()
+    await userEvent.click(screen.getByRole('button', { name: 'Back to Worklists' }))
+    expect(back).toBe(1)
+  })
+
+  it('opens through the provider without a side panel when the shell shows records as pages', async () => {
+    mock()
+    const opened: string[] = []
+    render(<SessionProvider><ClientRecordProvider onOpen={(sn) => opened.push(sn)}><ClientKey sn={RECORD.sn} /></ClientRecordProvider></SessionProvider>)
+    await userEvent.click(screen.getByRole('button', { name: /Open the record/ }))
+    expect(opened).toEqual([RECORD.sn])
+    expect(screen.queryByRole('dialog')).toBeNull()
+  })
+})

@@ -2,12 +2,13 @@
  * One client's record, for facility review: every failure episode, newest
  * first, with its dates, EAC progress, follow-up result, plan, and the
  * worklists it sits on with the next step. Opened from Client search and from
- * any client key in a table, through one panel mounted by the shell.
+ * any client key in a table. In the dashboard it opens as a full page (the
+ * shell passes `onOpen`); where no shell is mounted, as a side panel.
  *
  * The S/N is the only identifier the dashboard holds; the PEPID stays in the
  * vault. Every opening is recorded in the audit trail by the server.
  */
-import { Check, Copy, X } from 'lucide-react'
+import { ArrowLeft, Check, Copy, X } from 'lucide-react'
 import { createContext, useContext, useEffect, useState, type ReactNode } from 'react'
 import { cn } from 'cn'
 import { StatusBadge } from '@/components/status-badge'
@@ -51,12 +52,16 @@ export function useOpenClient() {
   return useContext(OpenClient)
 }
 
-export function ClientRecordProvider({ children }: { children: ReactNode }) {
+/**
+ * Makes client keys clickable. With `onOpen` the caller shows the record (the
+ * dashboard opens it as a page); without, it opens in a side panel here.
+ */
+export function ClientRecordProvider({ children, onOpen }: { children: ReactNode; onOpen?: (sn: string) => void }) {
   const [sn, setSn] = useState<string | null>(null)
   return (
-    <OpenClient.Provider value={setSn}>
+    <OpenClient.Provider value={onOpen ?? setSn}>
       {children}
-      <ClientRecordSheet sn={sn} onClose={() => setSn(null)} />
+      {!onOpen && <ClientRecordSheet sn={sn} onClose={() => setSn(null)} />}
     </OpenClient.Provider>
   )
 }
@@ -77,11 +82,10 @@ export function ClientKey({ sn, className }: { sn: string; className?: string })
   )
 }
 
-// ── the panel ─────────────────────────────────────────────────────────
-function ClientRecordSheet({ sn, onClose }: { sn: string | null; onClose: () => void }) {
+// ── loading a record ──────────────────────────────────────────────────
+function useClientRecord(sn: string | null) {
   const [rec, setRec] = useState<ClientRecord | null>(null)
   const [err, setErr] = useState<string | null>(null)
-
   useEffect(() => {
     if (!sn) return
     let off = false
@@ -95,6 +99,37 @@ function ClientRecordSheet({ sn, onClose }: { sn: string | null; onClose: () => 
       })
     return () => { off = true }
   }, [sn])
+  return { rec, err }
+}
+
+// ── the full page ─────────────────────────────────────────────────────
+/** The record as a page: the client across the top, episodes side by side on a wide screen. */
+export function ClientRecordPage({ sn, onBack, backLabel }: { sn: string; onBack: () => void; backLabel: string }) {
+  const { rec, err } = useClientRecord(sn)
+  return (
+    <div className="flex flex-col gap-6">
+      <div className="flex flex-wrap items-end justify-between gap-4">
+        <div className="flex flex-col gap-2">
+          <Button variant="ghost" size="sm" className="-ml-2 w-fit" onClick={onBack}>
+            <ArrowLeft />Back to {backLabel}
+          </Button>
+          <h1 className="text-2xl font-bold tracking-tight text-balance">Client record</h1>
+          <p className="max-w-3xl text-sm text-muted-foreground">
+            Everything the dashboard holds on this client, newest episode first. Opening a record is
+            recorded in the audit trail.
+          </p>
+        </div>
+      </div>
+      {err ? <Alert variant="destructive"><AlertDescription>{err}</AlertDescription></Alert>
+        : !rec ? <div className="flex flex-col gap-3" aria-busy="true"><Skeleton className="h-32" /><Skeleton className="h-80" /></div>
+        : <RecordBody rec={rec} wide />}
+    </div>
+  )
+}
+
+// ── the side panel (pages rendered outside the dashboard shell) ───────
+function ClientRecordSheet({ sn, onClose }: { sn: string | null; onClose: () => void }) {
+  const { rec, err } = useClientRecord(sn)
 
   return (
     <Sheet open={sn !== null} onOpenChange={(o) => { if (!o) onClose() }}>
@@ -135,11 +170,11 @@ function Fact({ label, children }: { label: string; children: ReactNode }) {
   )
 }
 
-export function RecordBody({ rec }: { rec: ClientRecord }) {
+export function RecordBody({ rec, wide = false }: { rec: ClientRecord; wide?: boolean }) {
   const active = rec.art_status?.trim().toLowerCase() === 'active'
   return (
     <>
-      <section aria-label="Client" className="flex flex-col gap-4 rounded-xl border p-4">
+      <section aria-label="Client" className={cn('flex flex-col gap-4 rounded-xl border p-4', wide && 'bg-card')}>
         <div className="flex flex-wrap items-center justify-between gap-2">
           <div className="flex flex-col">
             <span className="text-xs text-muted-foreground">S/N</span>
@@ -147,7 +182,7 @@ export function RecordBody({ rec }: { rec: ClientRecord }) {
           </div>
           <CopyKey sn={rec.sn} />
         </div>
-        <dl className="grid grid-cols-2 gap-x-6 gap-y-3 sm:grid-cols-3">
+        <dl className={cn('grid grid-cols-2 gap-x-6 gap-y-3 sm:grid-cols-3', wide && 'lg:grid-cols-4 xl:grid-cols-7')}>
           <Fact label="Facility">{rec.facility ?? DASH}</Fact>
           <Fact label="State">{rec.state ?? DASH}{rec.lga ? ` · ${rec.lga}` : ''}</Fact>
           <Fact label="Sex and age">{rec.sex ?? DASH}, {rec.age ?? DASH}</Fact>
@@ -172,7 +207,9 @@ export function RecordBody({ rec }: { rec: ClientRecord }) {
       <h3 className="text-sm font-semibold">
         {rec.episodes.length === 1 ? '1 failure episode' : `${rec.episodes.length} failure episodes`}
       </h3>
-      {rec.episodes.map((e, i) => <EpisodeCard key={e.episode} e={e} n={rec.episodes.length - i} />)}
+      <div className={cn('flex flex-col gap-5', wide && 'grid items-start xl:grid-cols-2')}>
+        {rec.episodes.map((e, i) => <EpisodeCard key={e.episode} e={e} n={rec.episodes.length - i} wide={wide} />)}
+      </div>
     </>
   )
 }
@@ -198,10 +235,10 @@ function outcome(e: Episode): ReactNode {
   return DASH
 }
 
-function EpisodeCard({ e, n }: { e: Episode; n: number }) {
+function EpisodeCard({ e, n, wide = false }: { e: Episode; n: number; wide?: boolean }) {
   const lists = WORKLISTS.filter((w) => e.worklists.includes(w.flag))
   return (
-    <section aria-label={`Episode ${n}`} className="flex flex-col gap-3 rounded-xl border p-4">
+    <section aria-label={`Episode ${n}`} className={cn('flex flex-col gap-3 rounded-xl border p-4', wide && 'bg-card')}>
       <div className="flex flex-wrap items-baseline justify-between gap-2">
         <span className="font-medium">Episode {n}</span>
         <span className="text-xs text-muted-foreground">{e.fy_quarter ?? ''}{e.months_unsuppressed != null ? ` · ${e.months_unsuppressed} months unsuppressed` : ''}</span>

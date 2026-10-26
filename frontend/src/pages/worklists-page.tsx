@@ -279,12 +279,12 @@ export function ClientTable({ rows, exportPath, flag, caption, loading = false }
       )}
       <div className={cn('transition-opacity', loading && 'pointer-events-none opacity-60')}>
         <DataTable columns={columns} data={rows}
-                   getRowId={(r) => r.episode} searchColumn="facility"
-                   searchPlaceholder="Search facilities" columnLabels={LABELS}
+                   getRowId={(r) => r.episode} searchText={(r) => `${r.facility ?? ''} ${r.sn}`}
+                   searchPlaceholder="Search facility or S/N" columnLabels={LABELS}
                    // Off by default so the table fits a laptop; the list
                    // is mostly Active anyway, and exports are Active only.
                    hiddenColumns={['art_status']}
-                   caption={caption} emptyText="No facility matches that search."
+                   caption={caption} emptyText="No facility or S/N matches that search."
                    actions={(selected) => canExport && (
                      <>
                        <Button variant="outline" size="sm" disabled={!selected.length || exporting !== null}

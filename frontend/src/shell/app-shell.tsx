@@ -1,7 +1,7 @@
 import { CircleAlert, Hammer } from 'lucide-react'
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { AppSidebar } from '@/components/app-sidebar'
-import { ClientRecordProvider } from '@/components/client-record'
+import { ClientRecordPage, ClientRecordProvider } from '@/components/client-record'
 import ErrorBoundary from '@/components/error-boundary'
 import { SiteHeader } from '@/components/site-header'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
@@ -39,8 +39,37 @@ export default function AppShell() {
   const [view, setView] = useState('overview')
   // Which worklist to open when arriving from another page (a cascade step).
   const [worklistFlag, setWorklistFlag] = useState<string | null>(null)
-  const navigate = (v: string) => { setWorklistFlag(null); setView(v); window.scrollTo(0, 0) }
-  const openWorklist = (flag: string) => { setWorklistFlag(flag); setView('worklists'); window.scrollTo(0, 0) }
+  // A client's record opens as a page OVER the current one, which stays
+  // mounted underneath (hidden), so Back returns to the same worklist, search
+  // and scroll position rather than a fresh page. The browser's Back does the
+  // same: opening a record pushes one history entry.
+  const [clientSn, setClientSn] = useState<string | null>(null)
+  const openSn = useRef<string | null>(null)
+  const scrollBack = useRef(0)
+  const openClient = useCallback((sn: string) => {
+    if (openSn.current === null) {
+      scrollBack.current = window.scrollY
+      window.history.pushState({ ecewsClient: sn }, '')
+    } else {
+      window.history.replaceState({ ecewsClient: sn }, '')
+    }
+    openSn.current = sn
+    setClientSn(sn)
+    window.scrollTo(0, 0)
+  }, [])
+  const closeClient = useCallback(() => {
+    openSn.current = null
+    setClientSn(null)
+    requestAnimationFrame(() => window.scrollTo(0, scrollBack.current))
+  }, [])
+  useEffect(() => {
+    const onPop = () => closeClient()
+    window.addEventListener('popstate', onPop)
+    return () => window.removeEventListener('popstate', onPop)
+  }, [closeClient])
+
+  const navigate = (v: string) => { openSn.current = null; setClientSn(null); setWorklistFlag(null); setView(v); window.scrollTo(0, 0) }
+  const openWorklist = (flag: string) => { openSn.current = null; setClientSn(null); setWorklistFlag(flag); setView('worklists'); window.scrollTo(0, 0) }
   const [summary, setSummary] = useState<Summary | null>(null)
   const [overview, setOverview] = useState<Ov | null>(null)
   const [times, setTimes] = useState<TimeMetrics | null>(null)
@@ -73,13 +102,13 @@ export default function AppShell() {
   const label = NAV.find((n) => n.id === view)?.label ?? 'Overview'
 
   return (
-    <ClientRecordProvider>
+    <ClientRecordProvider onOpen={openClient}>
     <SidebarProvider>
       <AppSidebar view={view} onNavigate={navigate}
                   asof={fmtDate(summary?.as_of)} episodes={fmt(summary?.n)}
                   clients={fmt(summary?.clients)} />
       <SidebarInset>
-        <SiteHeader title={label} onOpenDq={() => navigate('dq')} />
+        <SiteHeader title={clientSn ? 'Client record' : label} onOpenDq={() => navigate('dq')} />
         <div className="flex w-full flex-1 flex-col gap-6 p-4 lg:p-6">
           {err && (
             <Alert variant="destructive">
@@ -88,6 +117,13 @@ export default function AppShell() {
               <AlertDescription>{err}</AlertDescription>
             </Alert>
           )}
+          {clientSn && (
+            <ErrorBoundary name="Client record">
+              {/* Back goes through history, so the browser's own Back agrees. */}
+              <ClientRecordPage key={clientSn} sn={clientSn} backLabel={label} onBack={() => window.history.back()} />
+            </ErrorBoundary>
+          )}
+          <div className={clientSn ? 'hidden' : 'contents'}>
           {view === 'overview' ? (
             <ErrorBoundary name="Overview">
               <OverviewPage data={overview} times={times} trend={trend} loading={loading} />
@@ -145,6 +181,7 @@ export default function AppShell() {
               <WorklistsPage key={worklistFlag ?? 'default'} initialFlag={worklistFlag} />
             </ErrorBoundary>
           ) : <NotPorted label={label} />}
+          </div>
         </div>
       </SidebarInset>
     </SidebarProvider>
