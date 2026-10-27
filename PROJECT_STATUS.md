@@ -27,7 +27,9 @@ and no longer served; any old link to `/app` redirects permanently to `/`. Every
 hosted build uses the **repo root** as its context (`DEPLOY.md`), because the
 Dockerfile builds the dashboard from `frontend/`.
 
-Development continues on `react` and is merged into `main` for each release.
+Development happens on `develop` (named `react` until 27 Oct 2026) and is merged
+into `main` for each release; `main` only ever holds released work, because IT
+deploys it.
 `backend/scripts/bump_version.py` cuts a release: it bumps `app/VERSION`, commits
 and tags it; `/api/version` reports the version and commit being served.
 
