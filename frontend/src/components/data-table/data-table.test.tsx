@@ -100,4 +100,21 @@ describe('DataTable', () => {
     await user.type(screen.getByRole('textbox', { name: 'Search facilities' }), 'Ekiti')
     expect(screen.getByText('No facility matches that search.')).toBeInTheDocument()
   })
+
+  it('can search the facility and a key at once, e.g. the S/N', async () => {
+    const user = userEvent.setup()
+    render(<DataTable columns={columns} data={DATA} getRowId={(r) => r.id}
+                      searchText={(r) => `${r.facility} ${r.id}`}
+                      searchPlaceholder="Search facility or S/N" emptyText="No facility or S/N matches that search." />)
+    const box = screen.getByRole('textbox', { name: 'Search facility or S/N' })
+    await user.type(box, 'r17')
+    expect(bodyRows()).toHaveLength(1)
+    expect(bodyRows()[0]).toHaveTextContent('Delta Facility 17')
+    await user.clear(box)
+    await user.type(box, 'osun')
+    expect(screen.getByText('Page 1 of 1')).toBeInTheDocument()
+    await user.clear(box)
+    await user.type(box, 'nowhere')
+    expect(screen.getByText('No facility or S/N matches that search.')).toBeInTheDocument()
+  })
 })

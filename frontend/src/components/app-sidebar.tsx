@@ -1,6 +1,6 @@
 import {
   BookOpen, ChartLine, ClipboardList, FileText, GitCompareArrows, LayoutDashboard,
-  ListChecks, ListFilter, Microscope, Settings2, ShieldCheck, Stethoscope, Timer,
+  ListChecks, ListFilter, Microscope, Settings2, ShieldCheck, Stethoscope, Timer, UserSearch
 } from 'lucide-react'
 import {
   Sidebar, SidebarContent, SidebarFooter, SidebarGroup, SidebarGroupContent,
@@ -19,6 +19,7 @@ const ICONS: Record<string, typeof LayoutDashboard> = {
   time: Timer,
   compare: GitCompareArrows,
   worklists: ListChecks,
+  search: UserSearch,
   plans: ClipboardList,
   adv: ChartLine,
   dq: ShieldCheck,

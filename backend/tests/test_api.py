@@ -839,3 +839,45 @@ def test_the_original_dashboard_is_not_served(client):
     """Retired in version 2.0: its page and its vendor scripts are gone."""
     assert client.get("/vendor/chart.umd.min.js").status_code == 404
     assert client.get("/vendor/fonts.css").status_code == 404
+
+
+# ── client search and record ──────────────────────────────────────────
+def test_client_search_finds_by_part_of_the_sn(client, admin_h, cohort):
+    r = client.get("/api/client-search?q=000003", headers=admin_h).json()
+    assert r["n"] == 1 and r["clients"][0]["sn"] == "0.100000000003"
+    assert r["clients"][0]["episodes"] == 1
+
+
+def test_client_search_needs_a_real_criterion(client, admin_h, cohort):
+    """It finds a client; it is not a way to list everyone."""
+    assert client.get("/api/client-search", headers=admin_h).status_code == 400
+    assert client.get("/api/client-search?q=0.1", headers=admin_h).status_code == 400
+    assert client.get("/api/client-search?facility=Clinic A", headers=admin_h).status_code == 400
+    r = client.get("/api/client-search?facility=Clinic A&sex=Female", headers=admin_h)
+    assert r.status_code == 200 and r.json()["n"] == 2
+
+
+def test_client_search_and_record_respect_scope(client, admin_h, cohort):
+    h = _scoped_viewer(client, admin_h, "Delta")
+    found = client.get("/api/client-search?q=0.10000", headers=h).json()
+    assert {c["state"] for c in found["clients"]} == {"Delta"} and found["n"] == 3
+    # an Osun client reads exactly like an unknown one
+    assert client.get("/api/client/0.100000000003", headers=h).status_code == 404
+    assert client.get("/api/client/0.999", headers=h).status_code == 404
+    assert client.get("/api/client/0.100000000000", headers=h).status_code == 200
+
+
+def test_client_record_lists_episodes_and_their_worklists(client, admin_h, cohort):
+    r = client.get("/api/client/0.100000000000", headers=admin_h).json()
+    assert r["facility"] == "Clinic A" and len(r["episodes"]) == 1
+    ep = r["episodes"][0]
+    assert ep["idx_vl"] == 5000 and isinstance(ep["worklists"], list)
+
+
+def test_client_lookups_are_audited(client, admin_h, cohort):
+    client.get("/api/client-search?q=000003", headers=admin_h)
+    client.get("/api/client/0.100000000003", headers=admin_h)
+    audit = client.get("/api/audit", headers=admin_h).json()
+    actions = {a["action"] for a in audit["actions"]}
+    assert "clients.search" in actions
+    assert any("client record" in (r["detail"] or "") for r in audit["rows"])

@@ -13,7 +13,7 @@ import {
   ArrowDown, ArrowUp, ArrowUpDown, ChevronLeft, ChevronRight, ChevronsLeft,
   ChevronsRight, Columns3, Search,
 } from 'lucide-react'
-import { useState, type ReactNode } from 'react'
+import { useMemo, useRef, useState, type ReactNode } from 'react'
 import { cn } from 'cn'
 import { Button } from '@/components/ui/button'
 import {
@@ -43,7 +43,7 @@ const PAGE_SIZES = [10, 25, 50, 100]
  * Give it a `key` that changes with its data, so a new list starts unselected.
  */
 export function DataTable<TData extends RowData>({
-  columns, data, getRowId, searchColumn, searchPlaceholder = 'Search',
+  columns, data, getRowId, searchColumn, searchText, searchPlaceholder = 'Search',
   columnLabels = {}, emptyText = 'No rows.', actions, caption, hiddenColumns = [],
 }: {
   /** Columns that start hidden but can be shown from the Columns menu. */
@@ -51,8 +51,13 @@ export function DataTable<TData extends RowData>({
   columns: ColumnDef<DataTableFeatures, TData>[]
   data: TData[]
   getRowId?: (row: TData, index: number) => string
-  /** Column id the search box filters. No box without one. */
+  /** Column id the search box filters. No box without one (or `searchText`). */
   searchColumn?: string
+  /**
+   * What the search box matches instead of one column, e.g. the facility and
+   * the S/N together. Matched anywhere in the text, ignoring case.
+   */
+  searchText?: (row: TData) => string
   searchPlaceholder?: string
   /** Readable names for the Columns menu, keyed by column id. */
   columnLabels?: Record<string, string>
@@ -67,10 +72,21 @@ export function DataTable<TData extends RowData>({
   const [columnVisibility, setColumnVisibility] = useState<ColumnVisibilityState>(
     () => Object.fromEntries(hiddenColumns.map((id) => [id, false])))
   const [rowSelection, setRowSelection] = useState<RowSelectionState>({})
+  const [q, setQ] = useState('')
+  // Held in a ref: callers pass an inline function, and depending on it would
+  // re-filter (and send the table back to page 1) on every parent render.
+  const textOf = useRef(searchText)
+  textOf.current = searchText
+  const hasText = !!searchText
+  const shown = useMemo(() => {
+    const t = q.trim().toLowerCase()
+    const f = textOf.current
+    return f && t ? data.filter((r) => f(r).toLowerCase().includes(t)) : data
+  }, [data, q, hasText])
 
   const table = useTable({
     features,
-    data,
+    data: shown,
     columns,
     getRowId,
     initialState: { pagination: { pageIndex: 0, pageSize: 25 } },
@@ -86,16 +102,16 @@ export function DataTable<TData extends RowData>({
   const { pageIndex, pageSize } = table.state.pagination
   // Leaf columns: a group heading is not itself something to show or hide.
   const hideable = table.getAllLeafColumns().filter((c) => c.getCanHide())
-  const search = searchColumn ? table.getColumn(searchColumn) : undefined
+  const search = !searchText && searchColumn ? table.getColumn(searchColumn) : undefined
 
   return (
     <div className="flex flex-col gap-3">
       <div className="flex flex-wrap items-center gap-2">
-        {search && (
+        {(search || searchText) && (
           <div className="relative w-full sm:w-72">
             <Search className="pointer-events-none absolute top-1/2 left-2.5 size-4 -translate-y-1/2 text-muted-foreground" />
-            <Input value={(search.getFilterValue() as string) ?? ''}
-                   onChange={(e) => search.setFilterValue(e.target.value)}
+            <Input value={search ? (search.getFilterValue() as string) ?? '' : q}
+                   onChange={(e) => (search ? search.setFilterValue(e.target.value) : setQ(e.target.value))}
                    placeholder={searchPlaceholder} aria-label={searchPlaceholder}
                    className="pl-8" />
           </div>

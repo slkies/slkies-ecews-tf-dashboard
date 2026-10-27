@@ -1,6 +1,6 @@
 # ECEWS TF Monitor — Project Status & Handoff
 
-**Last updated:** 23 Oct 2026
+**Last updated:** 27 Oct 2026
 **Owner:** Es (Data Analytics Lead, ECEWS / SPEED Program — PEPFAR/CDC, Nigeria)
 **Purpose:** Online, multi-user web app for HIV ART **treatment-failure (TF)** and
 **EAC** monitoring across Delta, Osun, Ekiti. An admin loads the de-identified line
@@ -20,6 +20,7 @@ repo is public. Credentials live in `.env` (gitignored) or the host's secret sto
 
 ## 1. Where things run
 
+**Version 2.1** (27 Oct 2026) adds client search and the client record.
 **Version 2.0** (23 Oct 2026): the React dashboard is the dashboard, served at
 `/` from `main`, which IT deploys from. The original single-file app is retired
 and no longer served; any old link to `/app` redirects permanently to `/`. Every
@@ -74,12 +75,20 @@ windows.
 | Time metrics | Four medians, six timed steps as box plots against targets, Kaplan-Meier to re-suppression, time on ART to first unsuppressed VL by ART-start era |
 | Line list changes | Any two snapshots compared: days apart, episodes carried / new / gone, cascade movement with backwards steps marked |
 | Worklists | Twelve lists ranked by clinical urgency, each with its next step; sortable table, server-side audited export (admin/analyst) |
+| Client search | Find one client by S/N (or part of it), or by facility plus one detail; opens the client record |
 | Treatment plans | Plans A–H with the reason each applies, split by sex; a plan opens its clients |
 | Advanced analytics | Factors for re-suppression (forest plot, univariate and adjusted table), baseline CD4, the risk model with calibration and the lowest-chance list, mortality |
 | Data quality | Every check from the current upload, cohort checks apart from source-file checks |
 | Guidelines | 2024 national EAC guidance and where each rule is measured |
 | Methodology | Unit of analysis, cohort, who counts as a gap, definitions, data sources (every sheet read), known gaps |
 | Admin | Load line lists, upload history, deployment check, users and access (add, change role and scope, disable, delete, reset password), usage, feedback, audit trail |
+
+**Client record** (v2.1): every failure episode for one client, newest first — index VL
+with sample and received dates, EAC progress, follow-up result, plan, and each worklist
+with its next step. Opens as a full page from Client search or any client key in a
+table; Back returns to the same list and scroll position. Table searches on Worklists,
+Treatment plans and DTC review match the facility or the S/N. Searches and records
+cover the account's area only and are audited; the dashboard still holds no PEPID.
 
 The header carries data notices (serious cohort problems), the theme toggle, and the
 account menu: change your own password, send feedback, sign out. Every summary table

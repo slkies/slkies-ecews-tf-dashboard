@@ -15,6 +15,7 @@ export const NAV: NavItem[] = [
   { id: 'time',     label: 'Time metrics',       group: 'Programme' },
   { id: 'compare',  label: 'Line list changes',  group: 'Programme' },
   { id: 'worklists', label: 'Worklists',         group: 'Action' },
+  { id: 'search',   label: 'Client search',      group: 'Action' },
   { id: 'plans',    label: 'Treatment plans',    group: 'Action' },
   { id: 'adv',      label: 'Advanced analytics', group: 'Action' },
   { id: 'dq',       label: 'Data quality',       group: 'Reference' },

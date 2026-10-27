@@ -1,3 +1,4 @@
+import { ClientKey } from '@/components/client-record'
 import { createColumnHelper } from '@tanstack/react-table'
 import { ArrowRight, Stethoscope } from 'lucide-react'
 import { Fragment, useEffect, useMemo, useState } from 'react'
@@ -190,7 +191,7 @@ function useTrajectoryColumns() {
     col.accessor('sn', {
       header: 'Client',
       cell: ({ getValue }) => (
-        <span className="font-mono text-muted-foreground" title={getValue()}>{String(getValue()).slice(0, 10)}…</span>
+        <ClientKey sn={String(getValue())} />
       ),
       enableSorting: false, enableHiding: false,
     }),
@@ -485,10 +486,11 @@ export default function DtcPage({ onOpenWorklist }: { onOpenWorklist?: (flag: st
                   highest current viral load are listed. {fmt(oneResult)} have only one result on record, so
                   their trajectory cannot be read yet.
                 </p>
-                <DataTable key={query} columns={columns} data={traj.rows} searchColumn="facility"
-                           searchPlaceholder="Search facilities" caption="Viral load trajectories"
+                <DataTable key={query} columns={columns} data={traj.rows}
+                           searchText={(r) => `${r.facility ?? ''} ${r.sn}`}
+                           searchPlaceholder="Search facility or S/N" caption="Viral load trajectories"
                            columnLabels={{ facility: 'Facility', eac_stage: 'EAC', trajectory: 'Trajectory', latest_vl: 'Latest VL', pattern: 'Pattern' }}
-                           emptyText="No facility matches that search." />
+                           emptyText="No facility or S/N matches that search." />
               </>
             ) : <p className="py-6 text-center text-sm text-muted-foreground">No clients match this selection.</p>}
           </CardContent>
