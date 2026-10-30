@@ -1,6 +1,6 @@
 # ECEWS TF Monitor — Project Status & Handoff
 
-**Last updated:** 27 Oct 2026
+**Last updated:** 30 Oct 2026
 **Owner:** Es (Data Analytics Lead, ECEWS / SPEED Program — PEPFAR/CDC, Nigeria)
 **Purpose:** Online, multi-user web app for HIV ART **treatment-failure (TF)** and
 **EAC** monitoring across Delta, Osun, Ekiti. An admin loads the de-identified line
@@ -20,6 +20,13 @@ repo is public. Credentials live in `.env` (gitignored) or the host's secret sto
 
 ## 1. Where things run
 
+**Version 2.2** (30 Oct 2026): EAC rules corrected (decisions 22 to 25): extended EAC is
+this cycle's session 4 within 60 days of session 3; follow-up samples during EAC are
+flagged on the cascade; each failure episode gets its own EAC cycle; awaiting DTC
+review requires completed EAC; cycles are counted from the client's own episodes.
+New: the next-visit worklist and appointment date, session dates and pickup on the
+patient page, outcome by cycle and months to below 1,000 on DTC review. **The line
+list must be loaded again after deploying 2.2**: these are computed at load time.
 **Version 2.1** (27 Oct 2026) adds client search and the client record.
 **Version 2.0** (23 Oct 2026): the React dashboard is the dashboard, served at
 `/` from `main`, which IT deploys from. The original single-file app is retired
