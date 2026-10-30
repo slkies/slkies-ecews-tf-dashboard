@@ -81,24 +81,15 @@ export function monthsToBelow1000(vl: number | null | undefined): number | null 
   return Math.floor(Math.log10(vl) - 3) + 1
 }
 
-/** The projection as a small falling line, log scale, with 1,000 dashed. */
-function DropTrend({ vl }: { vl: number | null }) {
+/** The months, as text: a line per row added width without adding information (Es, 30 Oct 2026). */
+function MonthsTo({ vl }: { vl: number | null }) {
   const months = monthsToBelow1000(vl)
-  if (vl == null || months == null) return <span className="text-muted-foreground">{DASH}</span>
+  if (months == null) return <span className="text-muted-foreground">{DASH}</span>
   if (months === 0) return <span className="text-muted-foreground">Below 1,000</span>
-  const W = 64, H = 22, top = Math.log10(vl), bottom = Math.min(top - months, 2.5)
-  const y = (lg: number) => 2 + (top - lg) / (top - bottom) * (H - 4)
-  const x = (m: number) => 2 + m / months * (W - 4)
-  const pts = Array.from({ length: months + 1 }, (_, m) => `${x(m).toFixed(1)},${y(top - m).toFixed(1)}`).join(' ')
   return (
-    <span className="flex items-center gap-2" role="img"
-          aria-label={`From ${fmt(vl)}, falling one log a month: below 1,000 in ${months} month${months === 1 ? '' : 's'}`}>
-      <svg width={W} height={H} viewBox={`0 0 ${W} ${H}`} aria-hidden className="shrink-0">
-        <line x1="0" x2={W} y1={y(3)} y2={y(3)} stroke="var(--muted-foreground)" strokeWidth="1" strokeDasharray="2 2" />
-        <polyline points={pts} fill="none" stroke="var(--bad)" strokeWidth="1.5" strokeLinejoin="round" />
-        <circle cx={x(months)} cy={y(top - months)} r="2.2" fill="var(--good)" />
-      </svg>
-      <span className="font-medium tabular-nums whitespace-nowrap">{months} mo</span>
+    <span className="font-medium tabular-nums whitespace-nowrap"
+          title={`From ${fmt(vl)}, falling one log a month: below 1,000 in ${months} month${months === 1 ? '' : 's'}`}>
+      {months} {months === 1 ? 'month' : 'months'}
     </span>
   )
 }
@@ -276,7 +267,7 @@ function useTrajectoryColumns() {
     col.accessor((r) => monthsToBelow1000(r.latest_vl), {
       id: 'to_1000',
       header: ({ column }) => <SortableHeader column={column} title="Months to < 1,000" />,
-      cell: ({ row }) => <DropTrend vl={row.original.latest_vl} />,
+      cell: ({ row }) => <MonthsTo vl={row.original.latest_vl} />,
     }),
     col.accessor('pattern', {
       header: ({ column }) => <SortableHeader column={column} title="Pattern" />,

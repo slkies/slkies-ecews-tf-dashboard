@@ -55,12 +55,12 @@ describe('DTC review page', () => {
     expect(monthsToBelow1000(null)).toBeNull()
   })
 
-  it('draws each client projection, and the re-suppression rate by cycle', async () => {
+  it('gives each client the months to below 1,000, and the re-suppression rate by cycle', async () => {
     mock()
     draw()
     await ready()
     const latest = TRAJ.rows[0]!.latest_vl!
-    expect(screen.getAllByRole('img', { name: new RegExp(`From ${latest.toLocaleString('en-GB')}, falling one log a month: below 1,000 in ${monthsToBelow1000(latest)} month`) }).length).toBeGreaterThan(0)
+    expect(screen.getAllByTitle(new RegExp(`From ${latest.toLocaleString('en-GB')}, falling one log a month: below 1,000 in ${monthsToBelow1000(latest)} month`)).length).toBeGreaterThan(0)
     expect(screen.getByText('Re-suppression by EAC cycle')).toBeInTheDocument()
     expect(screen.getByText(/8 of 14/)).toBeInTheDocument()
   })
