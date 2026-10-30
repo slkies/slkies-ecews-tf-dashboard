@@ -720,3 +720,48 @@ def test_the_no_post_eac_vl_list_leaves_out_clients_waiting_for_their_visit():
     overdue = cohort([mk(**_DONE)], treatment_extra={"pharmacyLastPickupdate": "2026-06-01", "daysOfArvRefill": 30}).df
     assert bool(M._flag_mask(waiting, "vl_at_next_visit").iloc[0]) and not bool(M._flag_mask(waiting, "awaiting_vl").iloc[0])
     assert bool(M._flag_mask(overdue, "awaiting_vl").iloc[0]) and not bool(M._flag_mask(overdue, "vl_at_next_visit").iloc[0])
+
+
+# ── each failure episode gets its own EAC cycle (30 Oct 2026) ─────────
+_SN = "0.123456789012345"
+
+
+def _two_episodes(eac_rows):
+    """One client unsuppressed in April 2025 and again in April 2026."""
+    tu = pd.DataFrame([
+        {"S/N": _SN, "currentViralLoad": 27742, "dateofCurrentViralLoad": "2025-04-24",
+         "lastDateOfSampleCollection": "2025-04-24", "dateResultReceivedFacility": "2025-05-02"},
+        {"S/N": _SN, "currentViralLoad": 100761, "dateofCurrentViralLoad": "2026-04-10",
+         "lastDateOfSampleCollection": "2026-04-10", "dateResultReceivedFacility": "2026-04-24"},
+    ])
+    c = build_cohort(tu, treat(), pd.DataFrame(eac_rows), as_of=pd.Timestamp("2026-10-24"), mode="snapshot")
+    return c.df.sort_values("idx_date").reset_index(drop=True)
+
+
+def test_a_later_cycle_is_not_copied_onto_an_earlier_episode():
+    """The reported client: only the June 2026 cycle is on the EAC lists."""
+    d = _two_episodes([mk(**{"S/N": _SN}, Session_1_Date="2026-06-03", Session_2_Date="2026-07-01")])
+    assert pd.isna(d.loc[0, "Session_1_Date"]) and not bool(d.loc[0, "eac1"])
+    assert d.loc[1, "Session_1_Date"] == pd.Timestamp("2026-06-03") and bool(d.loc[1, "eac1"])
+
+
+def test_each_episode_gets_the_cycle_that_followed_it():
+    """An older list still carries the 2025 cycle; the newest carries 2026's."""
+    d = _two_episodes([
+        mk(**{"S/N": _SN}, Session_1_Date="2026-06-03", Session_2_Date="2026-07-01"),       # newest list
+        mk(**{"S/N": _SN}, Session_1_Date="2025-05-20", Session_2_Date="2025-06-18",
+           Session_3_Date="2025-07-16"),                                                    # older list
+    ])
+    assert d.loc[0, "Session_1_Date"] == pd.Timestamp("2025-05-20") and bool(d.loc[0, "eac3"])
+    assert d.loc[1, "Session_1_Date"] == pd.Timestamp("2026-06-03") and not bool(d.loc[1, "eac3"])
+
+
+def test_the_newest_list_wins_for_the_same_cycle():
+    """The same cycle on two lists: the newer has more sessions filled in."""
+    d = _two_episodes([
+        mk(**{"S/N": _SN}, Session_1_Date="2026-06-03", Session_2_Date="2026-07-01",
+           Session_3_Date="2026-07-29"),
+        mk(**{"S/N": _SN}, Session_1_Date="2026-06-03"),
+    ])
+    assert bool(d.loc[1, "eac3"])
+

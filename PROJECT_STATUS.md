@@ -140,6 +140,8 @@ in the spec and in `docs/DECISIONS_AND_INCIDENTS.md`.
     on or after session 1 and before session 3 is "during EAC"; a client whose next
     scheduled visit falls within 60 days of completing EAC is waiting, not overdue**
     (decision 22). Needs a fresh line list upload: these are computed at ingest.
+22. **Each failure episode gets its own EAC cycle**: session 1 after its index and before
+    the client's next index (decision 23).
 
 **Recurring bugs to guard:** chain `.fillna(False).astype(bool)` after a merge; never
 hold a `Series` across `sort_values().reset_index()` in `build_cohort`; cast a

@@ -244,6 +244,63 @@ class Cohort:
 
 
 # ── cohort construction ───────────────────────────────────────────────
+# The EAC fields that describe ONE counselling cycle. Everything else read from
+# the EAC list (first-ever and first-high VL) describes the client.
+_CYCLE_COLS = ("Session_1_Date", "Session_2_Date", "Session_3_Date",
+               "Session_4_Extended_Date", "sessions", "cycles",
+               "Session_1_Missed_Drug_Pickups")
+
+
+def _eac_for_episodes(base: pd.DataFrame, e: pd.DataFrame, cols: list[str]) -> pd.DataFrame:
+    """
+    The EAC cycle that belongs to each failure episode, aligned to `base`'s rows.
+
+    A client with two episodes used to receive the same EAC row on both: the EAC
+    lists were cut to one row per client (the newest) and joined on S/N alone.
+    An episode from April 2025 then showed a June 2026 session 1, passed the
+    "session 1 on or after the index" test, and read as counselled and still
+    failing when it never had EAC at all (Es, 30 Oct 2026).
+
+    Now every distinct cycle is kept - one per session 1 date, across all the
+    EAC lists, the newest list's row winning because it has the most sessions
+    filled in - and a cycle is matched to the episode it follows: session 1 on or
+    after that episode's index date and before the client's NEXT index date.
+    Where several fall in that window the first is taken. An episode with no
+    cycle in its window gets the latest cycle that started before its index, so
+    it still reads as "EAC predates the index VL" (not yet commenced), as before.
+    A cycle in a later episode's window is never pulled back onto an earlier one.
+
+    `e` must be newest list first (ingest concatenates it that way).
+    """
+    client_cols = [c for c in cols if c not in _CYCLE_COLS and c != "sn"]
+    cycle_cols = [c for c in cols if c in _CYCLE_COLS]
+
+    ep = pd.DataFrame({"sn": base["sn"].to_numpy(), "idx_date": base["idx_date"].to_numpy(),
+                       "_ep": np.arange(len(base))})
+    ep = ep.sort_values(["sn", "idx_date"])
+    ep["_next"] = ep.groupby("sn")["idx_date"].shift(-1)
+
+    cyc = e[e["Session_1_Date"].notna()].drop_duplicates(["sn", "Session_1_Date"])[["sn", *cycle_cols]]
+    m = ep.merge(cyc, on="sn", how="inner")
+    s1 = m["Session_1_Date"]
+    inwin = (s1 >= m["idx_date"]) & (m["_next"].isna() | (s1 < m["_next"]))
+    before = s1 < m["idx_date"]
+    m = m[(inwin | before).fillna(False)].copy()
+    s1i = m["Session_1_Date"].astype("int64")
+    w = inwin.loc[m.index].fillna(False).to_numpy()
+    # in the window: the earliest session 1; otherwise the latest before the index
+    m["_rank"] = np.where(w, 0, 1)
+    m["_key"] = np.where(w, s1i, -s1i)
+    m = m.sort_values(["_ep", "_rank", "_key"]).drop_duplicates("_ep")
+
+    out = pd.DataFrame(index=np.arange(len(base)))
+    out = out.join(m.set_index("_ep")[cycle_cols])
+    if client_cols:
+        cl = e.drop_duplicates("sn").set_index("sn")[client_cols]
+        out = out.join(cl.reindex(base["sn"].to_numpy()).reset_index(drop=True))
+    return out
+
+
 def build_cohort(
     total_unsuppressed: pd.DataFrame,
     treatment: pd.DataFrame,
@@ -271,7 +328,9 @@ def build_cohort(
     dropped = int(e["sn"].isna().sum() + tu["sn"].isna().sum())
     if dropped:
         warn.append(f"{dropped} rows dropped: blank S/N, cannot be linked.")
-    e = e.dropna(subset=["sn"]).drop_duplicates("sn")
+    # Every row is kept: a client's earlier EAC cycle is often still on an older
+    # list, and each episode is matched to its own cycle below.
+    e = e.dropna(subset=["sn"])
     tu = tu.dropna(subset=["sn"])
 
     # ---- the unit of analysis is a FAILURE EPISODE, not a client -------------
@@ -399,7 +458,8 @@ def build_cohort(
         "First_Ever_VL_Value", "First_Ever_VL_Result_Date",
         "First_High_VL_Value", "First_High_VL_Result_Date",
     ) if c in e]
-    df = base.merge(e[ecols], on="sn", how="left")
+    base = base.reset_index(drop=True)
+    df = base.join(_eac_for_episodes(base, e, ecols))
 
     t = treatment.dropna(subset=["sn"]).drop_duplicates("sn")
     tcols = {"state": "state", "lga": "lga", "facilityName": "facility",

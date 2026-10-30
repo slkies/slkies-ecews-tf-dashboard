@@ -446,3 +446,24 @@ list). Once the visit date passes with no sample they return to the overdue list
 
 Also: the Overview's follow-up VL tile shows samples first, then results (as the
 cascade does), so it compares like with like with the post-EAC sample tile.
+
+## 23. Each failure episode gets its own EAC cycle
+**30 Oct 2026** — A client unsuppressed in April 2025 and again in April 2026
+showed the same June 2026 session 1 on both episodes (Es). The EAC lists were cut
+to one row per client, the newest, and joined to episodes on S/N alone, so every
+episode of a client received the latest cycle. On an earlier episode a later
+cycle passes "session 1 on or after the index", so it read as counselled, and
+could appear on a list such as *Still unsuppressed after EAC*.
+
+**Rule.** Every distinct cycle on any EAC list is kept (one per session 1 date,
+the newest list's row winning). A cycle belongs to the episode it follows:
+session 1 on or after that episode's index date and before the client's next
+index date. An episode with none in its window takes the latest cycle that began
+before its index, so it reads as *EAC predates the index VL*, as before. A cycle
+is never pulled back onto an earlier episode.
+
+On the 24 Oct line list, 559 of the 1,032 episodes on repeat clients changed:
+249 lost a borrowed later cycle, and 310 were matched to their own earlier
+cycle from an older list. Commenced EAC 4,166 to 3,912; post-EAC VL samples
+1,314 to 1,497.
+
