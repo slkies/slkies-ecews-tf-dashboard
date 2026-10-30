@@ -23,16 +23,21 @@ import { api } from '@/core/api'
 import { useFilters } from '@/core/filters'
 import { DASH, fmt, fmtDate, pc } from '@/core/format'
 
+/** Still unsuppressed without completed EAC (decision 24): recessive, an EAC gap rather than a DTC case. */
+const NOT_DONE = 'color-mix(in oklch, var(--muted-foreground) 45%, transparent)'
+
 /* ─────────────────────────────────── types ─────────────────────────────────── */
 
-interface GapRow { level: string; still: number; awaiting: number; switched: number; prior: number; pct_awaiting: number | null }
+interface GapRow { level: string; still: number; awaiting: number; switched: number; prior: number; not_completed?: number; pct_awaiting: number | null }
 interface OrLevel { level: string; n: number; repeat: number; pct: number | null; ref: boolean
   or_: number | null; or_lo: number | null; or_hi: number | null; or_p: number | null }
 
 export interface Dtc {
   ok: boolean
   summary: { repeat_clients: number; repeat_still_clients: number; repeat_still_episodes: number
-    still: number; switched: number; awaiting: number; prior: number; dtc_flag: number }
+    still: number; switched: number; awaiting: number; prior: number; not_completed?: number; dtc_flag: number }
+  /** Re-suppression after a completed cycle, by the client's cycle number. */
+  by_cycle?: CycleOutcome[]
   repeat_assoc: { n: number; pct: number | null; variables: { label: string; levels: OrLevel[] }[] }
   switch_gap: { n_still: number; by_state: GapRow[]; by_regimen: GapRow[]; by_months: GapRow[]; by_cd4: GapRow[] }
   log_drop: { ok: boolean; n: number; median?: number; no_response_completed_eac?: number
@@ -52,6 +57,7 @@ export interface TrajRow {
   n_results: number; latest_vl: number | null; latest_date: string | null; pattern: string
 }
 export interface Trajectory { ok: boolean; n: number; shown?: number; rows: TrajRow[] }
+export interface CycleOutcome { cycle: string; n: number; resuppressed: number; pct: number | null }
 
 /* ─────────────────────────────────── helpers ───────────────────────────────── */
 
@@ -61,6 +67,31 @@ export function vlShort(v: number | null | undefined): string {
   if (v >= 1e6) return `${(v / 1e6).toFixed(1).replace(/\.0$/, '')}M`
   if (v >= 1e3) return `${Math.round(v / 1e3)}k`
   return String(Math.round(v))
+}
+
+/**
+ * Months for a viral load to fall below 1,000 copies/mL IF it fell by one log
+ * (tenfold) every month (Es, 30 Oct 2026). Not a prediction: arithmetic on a
+ * stated assumption, to give the DTC a sense of scale. 100,761 -> 10,076 ->
+ * 1,008 -> 101 is 3 months. A value already below 1,000 needs 0.
+ */
+export function monthsToBelow1000(vl: number | null | undefined): number | null {
+  if (vl == null || vl <= 0) return null
+  if (vl < 1000) return 0
+  return Math.floor(Math.log10(vl) - 3) + 1
+}
+
+/** The months, as text: a line per row added width without adding information (Es, 30 Oct 2026). */
+function MonthsTo({ vl }: { vl: number | null }) {
+  const months = monthsToBelow1000(vl)
+  if (months == null) return <span className="text-muted-foreground">{DASH}</span>
+  if (months === 0) return <span className="text-muted-foreground">Below 1,000</span>
+  return (
+    <span className="font-medium tabular-nums whitespace-nowrap"
+          title={`From ${fmt(vl)}, falling one log a month: below 1,000 in ${months} month${months === 1 ? '' : 's'}`}>
+      {months} {months === 1 ? 'month' : 'months'}
+    </span>
+  )
 }
 
 /** The shape of a VL history. Rebound and sharp rise are the switch signals. */
@@ -201,6 +232,8 @@ function useTrajectoryColumns() {
     }),
     col.accessor('eac_stage', {
       header: ({ column }) => <SortableHeader column={column} title="EAC" />,
+      // wraps, so "Commenced, not completed" does not set the table's width
+      cell: ({ getValue }) => <span className="block max-w-[8rem] whitespace-normal">{getValue()}</span>,
     }),
     col.display({
       id: 'trajectory',
@@ -231,10 +264,15 @@ function useTrajectoryColumns() {
         </span>
       ),
     }),
+    col.accessor((r) => monthsToBelow1000(r.latest_vl), {
+      id: 'to_1000',
+      header: ({ column }) => <SortableHeader column={column} title="Months to < 1,000" />,
+      cell: ({ row }) => <MonthsTo vl={row.original.latest_vl} />,
+    }),
     col.accessor('pattern', {
       header: ({ column }) => <SortableHeader column={column} title="Pattern" />,
       cell: ({ getValue }) => (
-        <span className={cn('rounded-md px-1.5 py-0.5 text-[11px] font-medium whitespace-nowrap',
+        <span className={cn('inline-block max-w-[8rem] rounded-md px-1.5 py-0.5 text-[11px] font-medium',
                             PATTERN_TONE[getValue()] ?? 'bg-muted text-muted-foreground')}>
           {getValue()}
         </span>
@@ -321,10 +359,11 @@ export default function DtcPage({ onOpenWorklist }: { onOpenWorklist?: (flag: st
     <div className={cn('flex flex-col gap-8 transition-opacity', loading && 'opacity-60')} aria-busy={loading}>
       {head}
 
-      <div className="grid gap-4 md:grid-cols-3 xl:grid-cols-6">
+      <div className="grid gap-4 md:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-7">
         <Stat label="Still at or above 1,000" value={fmt(s.still)} note="after the follow-up VL" tone="warn" />
         <Stat label="Of whom failed more than once" value={fmt(s.repeat_still_clients)} note={`clients, a subset of the ${fmt(s.still)}`} />
-        <Stat label="Awaiting DTC review" value={fmt(s.awaiting)} note="1st line at index, still 1st" tone="bad" />
+        <Stat label="Awaiting DTC review" value={fmt(s.awaiting)} note="completed EAC, 1st line at index, still 1st" tone="bad" />
+        <Stat label="EAC not completed" value={fmt(s.not_completed)} note="still 1st line; needs EAC first" tone="warn" />
         <Stat label="Prior switch" value={fmt(s.prior)} note="already 2nd/3rd line at index" tone="warn" />
         <Stat label="Switched" value={fmt(s.switched)} note="1st at index, now 2nd/3rd" />
         <Stat label="More than 2 cycles" value={fmt(s.dtc_flag)} note="still failing" tone={s.dtc_flag ? 'warn' : 'good'} />
@@ -343,6 +382,7 @@ export default function DtcPage({ onOpenWorklist }: { onOpenWorklist?: (flag: st
                 <Swatch color="var(--bad)" label="Awaiting DTC review" />
                 <Swatch color="var(--warn)" label="Prior switch" />
                 <Swatch color="var(--primary)" label="Switched" />
+                <Swatch color={NOT_DONE} label="EAC not completed" />
               </div>
               <ul className="flex flex-col gap-3" aria-label="Switch gap by state">
                 {gap.by_state.map((r) => {
@@ -359,7 +399,7 @@ export default function DtcPage({ onOpenWorklist }: { onOpenWorklist?: (flag: st
                           <span className="text-muted-foreground"> awaiting of {fmt(r.still)}</span></span>
                       </div>
                       <div className="flex h-[18px] w-full overflow-hidden rounded-[5px] bg-muted" aria-hidden>
-                        {seg(r.awaiting, 'var(--bad)')}{seg(r.prior, 'var(--warn)')}{seg(r.switched, 'var(--primary)', true)}
+                        {seg(r.awaiting, 'var(--bad)')}{seg(r.prior, 'var(--warn)')}{seg(r.switched, 'var(--primary)')}{seg(r.not_completed ?? 0, NOT_DONE, true)}
                       </div>
                     </li>
                   )
@@ -379,6 +419,7 @@ export default function DtcPage({ onOpenWorklist }: { onOpenWorklist?: (flag: st
                       <TableHead className="text-right">Awaiting</TableHead>
                       <TableHead className="text-right">Prior switch</TableHead>
                       <TableHead className="text-right">Switched</TableHead>
+                      <TableHead className="text-right">EAC not completed</TableHead>
                       <TableHead className="text-right">% awaiting</TableHead>
                     </TableRow>
                   </TableHeader>
@@ -387,7 +428,7 @@ export default function DtcPage({ onOpenWorklist }: { onOpenWorklist?: (flag: st
                        ['By baseline CD4', gap.by_cd4]] as const).map(([title, rows]) => (
                       <Fragment key={title}>
                         <TableRow className="bg-muted/30 hover:bg-muted/30">
-                          <TableCell colSpan={6} className="font-medium text-muted-foreground">{title}</TableCell>
+                          <TableCell colSpan={7} className="font-medium text-muted-foreground">{title}</TableCell>
                         </TableRow>
                         {rows.map((r) => (
                           <TableRow key={`${title}${r.level}`}>
@@ -396,6 +437,7 @@ export default function DtcPage({ onOpenWorklist }: { onOpenWorklist?: (flag: st
                             <TableCell className={cn('text-right tabular-nums', r.awaiting > 0 && 'font-medium text-bad')}>{fmt(r.awaiting)}</TableCell>
                             <TableCell className="text-right tabular-nums">{fmt(r.prior)}</TableCell>
                             <TableCell className="text-right tabular-nums">{fmt(r.switched)}</TableCell>
+                            <TableCell className="text-right tabular-nums">{fmt(r.not_completed)}</TableCell>
                             <TableCell className="text-right tabular-nums">{pc(r.pct_awaiting)}</TableCell>
                           </TableRow>
                         ))}
@@ -484,12 +526,14 @@ export default function DtcPage({ onOpenWorklist }: { onOpenWorklist?: (flag: st
                 <p className="text-xs text-muted-foreground">
                   {fmt(traj.n)} episodes still unsuppressed; the {fmt(traj.shown ?? traj.rows.length)} with the
                   highest current viral load are listed. {fmt(oneResult)} have only one result on record, so
-                  their trajectory cannot be read yet.
+                  their trajectory cannot be read yet. Months to &lt; 1,000 is how long the latest viral load
+                  would take to fall below 1,000 if it fell one log (tenfold) every month: arithmetic on that
+                  assumption, not a forecast.
                 </p>
                 <DataTable key={query} columns={columns} data={traj.rows}
                            searchText={(r) => `${r.facility ?? ''} ${r.sn}`}
                            searchPlaceholder="Search facility or S/N" caption="Viral load trajectories"
-                           columnLabels={{ facility: 'Facility', eac_stage: 'EAC', trajectory: 'Trajectory', latest_vl: 'Latest VL', pattern: 'Pattern' }}
+                           columnLabels={{ facility: 'Facility', eac_stage: 'EAC', trajectory: 'Trajectory', latest_vl: 'Latest VL', to_1000: 'Months to < 1,000 at 1 log/month', pattern: 'Pattern' }}
                            emptyText="No facility or S/N matches that search." />
               </>
             ) : <p className="py-6 text-center text-sm text-muted-foreground">No clients match this selection.</p>}
@@ -545,13 +589,37 @@ export default function DtcPage({ onOpenWorklist }: { onOpenWorklist?: (flag: st
         </Card>
       </Section>
 
+      {(d.by_cycle?.length ?? 0) > 0 && (
+        <Section eyebrow="Cycles" title="Re-suppression by EAC cycle"
+                 description="Of completed cycles with a follow-up result, how many re-suppressed, by which cycle it was for the client. Cycles are counted from each client's own episodes. A second cycle succeeds far less often than a first, which is why failure after a completed cycle goes to the DTC rather than another round of EAC.">
+          <Card className="min-w-0">
+            <CardContent className="flex flex-col gap-4">
+              {d.by_cycle!.map((c) => (
+                <div key={c.cycle} className="flex flex-col gap-1.5">
+                  <div className="flex items-baseline justify-between gap-3 text-sm">
+                    <span>{c.cycle}</span>
+                    <span className="tabular-nums">
+                      <span className="font-medium">{c.pct == null ? DASH : `${c.pct}%`}</span>
+                      <span className="text-muted-foreground"> re-suppressed, {fmt(c.resuppressed)} of {fmt(c.n)}</span>
+                    </span>
+                  </div>
+                  <span className="h-[18px] w-full overflow-hidden rounded-[5px] bg-muted" aria-hidden>
+                    <span className="block h-full rounded-[5px] bg-[var(--icon)]" style={{ width: `${c.pct ?? 0}%` }} />
+                  </span>
+                </div>
+              ))}
+            </CardContent>
+          </Card>
+        </Section>
+      )}
+
       <Section eyebrow="Act" title="Intervention worklists"
                description="The episodes a DTC needs to see. Each opens its worklist under the current filters.">
         <Card className="min-w-0">
           <CardContent className="px-0">
             <Table className="text-xs">
               <TableBody>
-                {([['awaiting_switch', 'Awaiting DTC review: 1st line at index, still 1st, still at or above 1,000', s.awaiting],
+                {([['awaiting_switch', 'Awaiting DTC review: completed EAC, 1st line at index, still 1st, still at or above 1,000', s.awaiting],
                    ['prior_switch', 'Prior switch: 2nd/3rd line at index, needs a drug-history and VL review', s.prior],
                    ['dtc_review', 'More than 2 EAC cycles, still failing', s.dtc_flag]] as const).map(([flag, label, n]) => (
                   <TableRow key={flag}>

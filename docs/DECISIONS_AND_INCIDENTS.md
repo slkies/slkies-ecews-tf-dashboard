@@ -412,8 +412,81 @@ Deep dive's actionable flags, most urgent first:
 | 4 | Medium | Completed EAC 30+ days ago, no post-EAC VL | the decision is blocked on a sample |
 | 5 | Medium | Unsuppressed with no valid EAC record | no intervention yet |
 | 6 | Medium | Started EAC but not completed | intervention stalled |
-| 7 | Low | Unsuppressed for more than 6 months | a wide net overlapping the above |
-| 8 | Low | Left care before a repeat VL | tracing, not EAC |
+| 7 | Low | Completed EAC, VL expected at the next scheduled visit | added by decision 22 |
+| 8 | Low | Unsuppressed for more than 6 months | a wide net overlapping the above |
+| 9 | Low | Left care before a repeat VL | tracing, not EAC |
 
 Context and data-check lists are not ranked. The order lives in one place
 (`WORKLISTS` in `worklists-page.tsx`) and is the programme's to change.
+
+## 22. Extended EAC, samples during EAC, and clients waiting for their visit
+**30 Oct 2026** — Three rules, from a facility review where nearly every client
+showed extended EAC (Es).
+
+**Extended EAC counts this cycle only.** A session 4 counts when it is dated on or
+before day 60 after the index cycle's session 3. The old rule,
+`Total_EAC_Sessions_All_Cycles >= 4`, counted every earlier cycle's sessions: on
+the 24 Oct line list it called 1,948 episodes extended, against 379 now. Sessions
+run monthly (median gap 31 days), so a session 4 at day 28 counts; one after day
+60 is shown on the client record but not counted.
+
+**A follow-up sample during EAC** is any sample dated on or after session 1 and
+before session 3, whether or not counselling carried on afterwards (610 to 648).
+The old rule caught it only when a later session was never held. The cascade
+shows these, and samples taken before EAC began (506), under the follow-up sample
+step, each opening its worklist, for root-cause review.
+
+**Waiting for the next visit is not overdue.** A client who completed EAC, has no
+post-EAC sample, and whose next scheduled visit (last pickup plus days of ARVs
+dispensed, else the pharmacy's estimate) falls within 60 days of completing EAC
+and is still ahead, is likely to have the VL drawn at that visit. They move from
+*Completed EAC 30+ days ago, no post-EAC VL sample* to their own Low-priority list,
+*Completed EAC, VL expected at the next scheduled visit* (131 of 921 on the 24 Oct
+list). Once the visit date passes with no sample they return to the overdue list.
+
+Also: the Overview's follow-up VL tile shows samples first, then results (as the
+cascade does), so it compares like with like with the post-EAC sample tile.
+
+## 23. Each failure episode gets its own EAC cycle
+**30 Oct 2026** — A client unsuppressed in April 2025 and again in April 2026
+showed the same June 2026 session 1 on both episodes (Es). The EAC lists were cut
+to one row per client, the newest, and joined to episodes on S/N alone, so every
+episode of a client received the latest cycle. On an earlier episode a later
+cycle passes "session 1 on or after the index", so it read as counselled, and
+could appear on a list such as *Still unsuppressed after EAC*.
+
+**Rule.** Every distinct cycle on any EAC list is kept (one per session 1 date,
+the newest list's row winning). A cycle belongs to the episode it follows:
+session 1 on or after that episode's index date and before the client's next
+index date. An episode with none in its window takes the latest cycle that began
+before its index, so it reads as *EAC predates the index VL*, as before. A cycle
+is never pulled back onto an earlier episode.
+
+On the 24 Oct line list, 559 of the 1,032 episodes on repeat clients changed:
+249 lost a borrowed later cycle, and 310 were matched to their own earlier
+cycle from an older list. Commenced EAC 4,166 to 3,912; post-EAC VL samples
+1,314 to 1,497.
+
+## 24. Awaiting DTC review requires completed EAC
+**30 Oct 2026** — *Still unsuppressed after EAC, awaiting DTC review* held every
+episode still at or above 1,000 on first line, whether or not EAC had happened,
+so an episode with no EAC could sit on the highest-priority list (Es). It now
+also requires completed EAC. Those without it are the EAC lists' work, and are
+shown wherever the still-unsuppressed group is split, as *EAC not completed*, so
+awaiting + prior switch + switched + EAC not completed = still at or above 1,000.
+
+## 25. EAC cycles are counted from the client's own episodes
+**30 Oct 2026** — The export's `EAC_Cycle_Number` reads 1 (or 0, or `1/0/1900`) for
+every client, so *More than 2 EAC cycles, still failing* was always empty. Since
+decision 23 each episode carries its own cycle, so a client's 1st, 2nd and 3rd
+counselled episodes are their cycles 1, 2 and 3. That number drives the list (a
+third or later cycle, not re-suppressed: 6 clients on the 24 Oct line list) and the
+patient page's "cycle N", and DTC review shows re-suppression by cycle: 85.6% after a
+first completed cycle, 57.1% after a second (8 of 14).
+
+DTC review also shows, per client, how many months the latest viral load would take
+to fall below 1,000 **if** it fell one log a month (Es). It is arithmetic on that
+stated assumption, labelled as such, not a forecast: the line list carries one VL per
+client, so there is no per-client trend to fit, and response is near all-or-nothing
+(median fall 3.3 log among those who re-suppressed, -0.1 among those who did not).
+

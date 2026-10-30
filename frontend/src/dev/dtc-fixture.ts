@@ -7,6 +7,11 @@ const lv = (level: string, n: number, repeat: number, ref = false, or_: number |
 
 export const DTC: Dtc = {
   ok: true,
+  by_cycle: [
+    { cycle: 'Cycle 1', n: 1332, resuppressed: 1140, pct: 85.6 },
+    { cycle: 'Cycle 2', n: 14, resuppressed: 8, pct: 57.1 },
+    { cycle: 'Cycle 3 or later', n: 0, resuppressed: 0, pct: null },
+  ],
   summary: { repeat_clients: 410, repeat_still_clients: 118, repeat_still_episodes: 131,
     still: 675, switched: 96, awaiting: 470, prior: 109, dtc_flag: 21 },
   repeat_assoc: { n: 853, pct: 18.4, variables: [

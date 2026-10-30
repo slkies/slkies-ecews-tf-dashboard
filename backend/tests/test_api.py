@@ -846,6 +846,7 @@ def test_client_search_finds_by_part_of_the_sn(client, admin_h, cohort):
     r = client.get("/api/client-search?q=000003", headers=admin_h).json()
     assert r["n"] == 1 and r["clients"][0]["sn"] == "0.100000000003"
     assert r["clients"][0]["episodes"] == 1
+    assert "next_visit" in r["clients"][0]     # shown in the results table
 
 
 def test_client_search_needs_a_real_criterion(client, admin_h, cohort):

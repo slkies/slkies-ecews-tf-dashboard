@@ -142,11 +142,15 @@ function Headline({ data, trend, since }: { data: Ov; trend: Trend | null; since
                note={`${fmt(data.post_eac_vl)} of ${fmt(data.completed)} who completed EAC`}
                status={badge(rateTone(postEacPct, 60, 'bad'))}
                definition="Sessions 1-3 plus a viral load sample on or after session 3, over episodes that completed EAC. A different indicator from the follow-up VL." />
-      <KpiTile icon={Microscope} label="Follow-up VL done" value={pc(data.retest_pct)}
-               trend={tv?.retest} since={since}
-               note={`${fmt(data.retested)} of ${fmt(data.in_care ?? data.n)} · ${fmt(data.awaiting_retest)} with no later VL`}
-               status={badge(rateTone(data.retest_pct, 50, 'bad'))}
-               definition="Episodes with any viral load sampled after the index result was received, over episodes still in care or retested. Taken from the clinical line lists, never the EAC sheet." />
+      {/* Samples, then results, as the cascade reads them (steps 7 and 8), so
+          this compares like with like with the post-EAC sample tile beside it. */}
+      <KpiTile icon={Microscope} label="Follow-up VL sample"
+               value={pc(data.fu_sample_pct ?? data.retest_pct)}
+               note={data.fu_sampled != null
+                 ? `${fmt(data.fu_sampled)} of ${fmt(data.in_care ?? data.n)} sampled · ${fmt(data.retested)} results back (${pc(data.retest_pct)})`
+                 : `${fmt(data.retested)} of ${fmt(data.in_care ?? data.n)} · ${fmt(data.awaiting_retest)} with no later VL`}
+               status={badge(rateTone(data.fu_sample_pct ?? data.retest_pct, 50, 'bad'))}
+               definition="Episodes with a viral load sampled after the index result was received, then how many of those results have come back. Over episodes still in care or retested. Taken from the clinical line lists, never the EAC sheet." />
       <KpiTile icon={Activity} label="Re-suppressed" value={pc(data.resupp_pct)}
                trend={tv?.resupp} since={since}
                note={`${fmt(data.resuppressed)} of ${fmt(data.retested)} with a follow-up VL`}
@@ -158,9 +162,11 @@ function Headline({ data, trend, since }: { data: Ov; trend: Trend | null; since
                status={data.awaiting_switch
                  ? <StatusBadge tone="bad">Action needed</StatusBadge>
                  : <StatusBadge tone="good">None waiting</StatusBadge>}
-               definition="Episodes whose follow-up viral load is still at or above 1,000 copies/mL and are waiting for the switch committee's decision.">
-        <dl className="grid grid-cols-3 gap-3 border-t pt-3">
+               definition="Episodes that completed EAC, were on first line at the index VL and still are, and whose follow-up viral load is still at or above 1,000 copies/mL: waiting for the switch committee's decision.">
+        <dl className="grid grid-cols-2 gap-3 border-t pt-3 sm:grid-cols-4">
           <MiniStat term="Still ≥ 1,000" value={fmt(data.still_unsuppressed)} />
+          <MiniStat term="EAC not completed"
+                    value={fmt(Math.max(0, data.still_unsuppressed - data.awaiting_switch - data.prior_switch - data.switched))} />
           <MiniStat term="Prior switch" value={fmt(data.prior_switch)} />
           <MiniStat term="Switched" value={fmt(data.switched)}
                     sub={data.switch_pct != null ? `${pc(data.switch_pct)} of ${fmt(data.switch_eligible)} eligible` : undefined} />

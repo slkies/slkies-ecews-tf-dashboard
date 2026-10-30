@@ -45,7 +45,7 @@ export const WORKLISTS: {
   /** What a facility team does next, in one line. */
   next: string
 }[] = [
-  { flag: 'awaiting_switch', label: 'Still unsuppressed after EAC, awaiting DTC review', group: 'Needs action', rank: 1, priority: 'High',
+  { flag: 'awaiting_switch', label: 'Still unsuppressed after completed EAC, awaiting DTC review', group: 'Needs action', rank: 1, priority: 'High',
     next: 'Present at the next DTC meeting for a decision on the next regimen line.' },
   { flag: 'dtc_review', label: 'More than 2 EAC cycles, still failing', group: 'Needs action', rank: 2, priority: 'High',
     next: 'Refer to the DTC: repeated EAC has not worked, so adherence alone is unlikely to explain it.' },
@@ -57,16 +57,18 @@ export const WORKLISTS: {
     next: 'Start EAC, or enter the sessions if they were held but not recorded.' },
   { flag: 'eac_incomplete', label: 'Started EAC but not completed', group: 'Needs action', rank: 6, priority: 'Medium',
     next: 'Book the remaining sessions. Three are needed before the repeat VL.' },
-  { flag: 'long_unsuppressed', label: 'Unsuppressed for more than 6 months', group: 'Needs action', rank: 7, priority: 'Low',
+  { flag: 'vl_at_next_visit', label: 'Completed EAC, VL expected at the next scheduled visit', group: 'Needs action', rank: 7, priority: 'Low',
+    next: 'Make sure the post-EAC VL sample is drawn at the scheduled visit; the date is in the Next visit column.' },
+  { flag: 'long_unsuppressed', label: 'Unsuppressed for more than 6 months', group: 'Needs action', rank: 8, priority: 'Low',
     next: 'A wider net that overlaps the lists above. Check each client is on one of them.' },
-  { flag: 'exited_no_vl', label: 'Left care before a repeat VL', group: 'Needs action', rank: 8, priority: 'Low',
+  { flag: 'exited_no_vl', label: 'Left care before a repeat VL', group: 'Needs action', rank: 9, priority: 'Low',
     next: 'Trace and return to care. This is tracing work, not an EAC gap.' },
   { flag: 'prior_switch', label: 'Already switched before the index VL', group: 'Context and data checks',
     next: 'Context only: the client was already switched when the index VL was taken.' },
   { flag: 'trunc_pre', label: 'Sample taken before EAC session 1', group: 'Context and data checks',
     next: 'Check the dates. A sample taken before EAC began cannot measure the effect of EAC.' },
-  { flag: 'trunc_mid', label: 'Sample taken mid-cycle, before session 3', group: 'Context and data checks',
-    next: 'Check the dates. A sample taken before session 3 means the cycle was cut short.' },
+  { flag: 'trunc_mid', label: 'Follow-up sample taken during EAC, before session 3', group: 'Context and data checks',
+    next: 'Check the dates. A sample drawn before session 3 cannot measure the full course; find out why it was drawn early.' },
   { flag: 'prior_cycle', label: 'EAC session predates the index VL', group: 'Context and data checks',
     next: 'Check the dates. A session dated before the index VL belongs to an earlier cycle.' },
 ]
@@ -98,6 +100,8 @@ export interface ClientRow {
   idx_samp: string | null
   idx_date: string | null
   sessions: number | null
+  /** Next scheduled visit: last pickup plus days of ARVs dispensed. */
+  next_visit?: string | null
   eac_completed: boolean | null
   fu_vl: number | null
   /** Follow-up VL sample collected. */
@@ -113,9 +117,9 @@ export interface ClientRow {
 const LABELS: Record<string, string> = {
   sn: 'Client', facility: 'Facility', state: 'State', sex: 'Sex', age: 'Age',
   art_status: 'ART status', idx_vl: 'Index VL', idx_samp: 'Index VL sample collected',
-  recv_date: 'Index VL result received', sessions: 'EAC sessions', fu_vl: 'Follow-up VL',
+  recv_date: 'Index VL result received', sessions: 'EAC sessions (all cycles)', fu_vl: 'Follow-up VL',
   fu_samp: 'Follow-up VL sample collected', fu_date: 'Follow-up VL result received',
-  months_unsuppressed: 'Months unsuppressed',
+  months_unsuppressed: 'Months unsuppressed', next_visit: 'Next scheduled visit',
   treatment_plan: 'Plan',
 }
 
@@ -190,7 +194,8 @@ function useColumns() {
       ]),
     }),
     col.accessor('sessions', {
-      header: ({ column }) => <SortableHeader column={column} title="Sessions" align="right" />,
+      // Total_EAC_Sessions_All_Cycles: every cycle, not just this one.
+      header: ({ column }) => <SortableHeader column={column} title="Sessions (all cycles)" align="right" />,
       cell: ({ getValue }) => <span className="block text-right tabular-nums">{getValue() ?? 0}</span>,
     }),
     col.group({
@@ -231,6 +236,10 @@ function useColumns() {
     col.accessor('art_status', {
       header: ({ column }) => <SortableHeader column={column} title="ART status" />,
       cell: ({ getValue }) => getValue() ?? DASH,
+    }),
+    col.accessor('next_visit', {
+      header: ({ column }) => <SortableHeader column={column} title="Next visit" />,
+      cell: ({ getValue }) => <DateCell value={getValue() ?? null} />,
     }),
     col.accessor('treatment_plan', {
       header: ({ column }) => <SortableHeader column={column} title="Plan" />,
@@ -283,7 +292,8 @@ export function ClientTable({ rows, exportPath, flag, caption, loading = false }
                    searchPlaceholder="Search facility or S/N" columnLabels={LABELS}
                    // Off by default so the table fits a laptop; the list
                    // is mostly Active anyway, and exports are Active only.
-                   hiddenColumns={['art_status']}
+                   // Next visit matters on the lists waiting for a post-EAC sample.
+                   hiddenColumns={flag === 'vl_at_next_visit' || flag === 'awaiting_vl' ? ['art_status'] : ['art_status', 'next_visit']}
                    caption={caption} emptyText="No facility or S/N matches that search."
                    actions={(selected) => canExport && (
                      <>

@@ -406,7 +406,7 @@ def _load(u: dict, f: Filters, upload_id: int | None = None) -> pd.DataFrame:
               # worklist flags read straight from the cohort; missing from this
               # list, a NULL in any of them made that worklist fail outright
               "post_eac_vl", "awaiting_switch", "prior_switch",
-              "eac_trunc_pre", "eac_trunc_mid"):
+              "eac_trunc_pre", "eac_trunc_mid", "vl_at_next_visit"):
         if b in df:
             df[b] = df[b].fillna(False).astype(bool)
     for d in ("idx_date", "fu_date", "fu_samp"):
@@ -634,7 +634,12 @@ FLAGS = {
     "eac_incomplete": lambda d: d["eac1"] & ~d["eac_completed"] & _in_care(d),
     # the new gap (team review): completed the course >=30 days ago but no VL
     # sample has been collected on/after session 3
-    "awaiting_vl": lambda d: d["eac_completed"] & ~d["post_eac_vl"] & _in_care(d),
+    # Completed, no post-EAC sample, and no scheduled visit about to bring one.
+    "awaiting_vl": lambda d: (d["eac_completed"] & ~d["post_eac_vl"]
+                              & ~_bool(d, "vl_at_next_visit") & _in_care(d)),
+    # ...and those whose next scheduled visit is within two months of finishing
+    # EAC and still ahead: the VL will likely be drawn then (decision 22).
+    "vl_at_next_visit": lambda d: _bool(d, "vl_at_next_visit") & _in_care(d),
     "awaiting_switch": lambda d: d["awaiting_switch"],
     "prior_switch": lambda d: d["prior_switch"],
     # left care (LTFU/died/IIT/stopped/transferred out) and never retested
@@ -659,7 +664,7 @@ CLIENT_COLS = ["sn", "state", "lga", "facility", "sex", "age", "art_status",
                "idx_vl", "recv_date", "idx_samp", "idx_date",
                "sessions", "eac_completed", "fu_vl", "fu_samp", "fu_date",
                "still_unsuppressed", "switched", "months_unsuppressed",
-               "treatment_plan"]
+               "treatment_plan", "next_visit"]
 
 # Readable headings for the CSV only. The JSON keys stay as they are, because
 # the dashboard reads them.
@@ -701,6 +706,14 @@ EXPORT_HEADERS = {
 def _json_safe(df: pd.DataFrame) -> list[dict]:
     """NaN/NaT are not valid JSON. Convert to null before serialising."""
     return df.astype(object).where(pd.notna(df), None).to_dict("records")
+
+
+def _bool(df: pd.DataFrame, col: str) -> pd.Series:
+    """A stored true/false column, False where absent (a snapshot loaded
+    before the column existed)."""
+    if col not in df:
+        return pd.Series(False, index=df.index)
+    return df[col].fillna(False).astype(bool)
 
 
 def _flag_mask(df: pd.DataFrame, flag: str) -> pd.Series:
@@ -765,9 +778,11 @@ _SEARCH_LIMIT = 50
 
 _RECORD_CLIENT = ["sn", "state", "lga", "facility", "sex", "age", "art_status",
                   "regimen_line", "regimen", "art_year", "exit_date",
+                  "last_pickup", "days_refill", "next_visit",
                   "first_vl", "first_vl_date", "first_high_vl", "first_high_date"]
 _RECORD_EPISODE = ["episode", "idx_vl", "idx_samp", "recv_date", "idx_date",
-                   "fy_quarter", "s1_date", "eac1", "eac2", "eac3", "eac_extended",
+                   "fy_quarter", "s1_date", "s2_date", "s3_date", "s4_date",
+                   "eac1", "eac2", "eac3", "eac_extended", "vl_at_next_visit", "eac_cycle_no",
                    "eac_completed", "sessions", "post_eac_vl", "fu_samp", "fu_date",
                    "fu_vl", "awaiting_result", "resuppressed", "llv",
                    "still_unsuppressed", "switched", "months_unsuppressed",
@@ -828,7 +843,8 @@ def client_search(u: U, request: Request,
         latest = latest.assign(episodes=latest["sn"].map(df["sn"].value_counts()))
         n = len(latest)
         rows = _json_safe(latest[["sn", "facility", "state", "sex", "age", "art_status",
-                                  "idx_vl", "recv_date", "idx_date", "episodes"]]
+                                  "idx_vl", "recv_date", "idx_date", "episodes",
+                                  *(["next_visit"] if "next_visit" in latest else [])]]
                           .head(_SEARCH_LIMIT))
     crit = ", ".join(f"{k}={v}" for k, v in
                      [("sn~", q), ("facility", facility), ("sex", sex),
@@ -1683,6 +1699,11 @@ def overview(u: U, f: F):
         # cannot be reported against the EAC denominator (that gave >100%).
         "retested": rs, "retest_pct": rate(rs, nb),
         "awaiting_retest": nb - rs,
+        # Samples first, then results, as the cascade reads (steps 7 and 8):
+        # the post-EAC tile counts samples, so a results-only follow-up tile
+        # beside it did not compare like with like (Es, 30 Oct 2026).
+        "fu_sampled": int(dg["post_sample"].sum()),
+        "fu_sample_pct": rate(int(dg["post_sample"].sum()), nb),
         "resuppressed": rr, "resupp_pct": rate(rr, rs),
         "still_unsuppressed": still,
         "switch_eligible": len(sw_elig),

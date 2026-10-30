@@ -2,7 +2,8 @@ name: CI
 
 on:
   push:
-    branches: [main]
+    # develop too, so a problem shows before it is released to main
+    branches: [main, develop]
   pull_request:
   workflow_dispatch:
 

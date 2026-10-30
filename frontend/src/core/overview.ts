@@ -76,6 +76,8 @@ export interface Overview {
   post_eac_vl: number
   retested: number; retest_pct: number | null
   awaiting_retest: number
+  /** Follow-up VL samples collected (cascade step 7); retested counts results (step 8). */
+  fu_sampled?: number; fu_sample_pct?: number | null
   resuppressed: number; resupp_pct: number | null
   still_unsuppressed: number
   switch_eligible: number

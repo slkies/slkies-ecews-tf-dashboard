@@ -485,6 +485,8 @@ COHORT_COLS = [
     "time_to_eac", "eac_lead_time", "time_to_resupp", "months_unsuppressed",
     "treatment_plan", "episode", "enrol_quarter", "fy",
     "first_vl", "first_vl_date", "first_high_vl", "first_high_date",
+    "s2_date", "s3_date", "s4_date", "last_pickup", "days_refill", "next_visit",
+    "vl_at_next_visit", "eac_cycle_no",
 ]
 
 
@@ -527,6 +529,10 @@ VL_HISTORY = {
 def cohort_records(df: pd.DataFrame, upload_id: int) -> list[tuple]:
     d = df.copy()
     d["s1_date"] = pd.to_datetime(d.get("Session_1_Date"), errors="coerce")
+    # Sessions 2 to 4 dated too, for the client record (they were only flags).
+    for dest, src in (("s2_date", "Session_2_Date"), ("s3_date", "Session_3_Date"),
+                      ("s4_date", "Session_4_Extended_Date")):
+        d[dest] = pd.to_datetime(d.get(src), errors="coerce")
     # fu_date is set in build_cohort, from whichever source supplied fu_vl.
     # It used to be read here from the EAC sheet, which is a different
     # source's date for a possibly different test - and which never reached

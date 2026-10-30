@@ -1,4 +1,4 @@
-import { ArrowRight, GitBranch } from 'lucide-react'
+import { ArrowRight, GitBranch, TriangleAlert } from 'lucide-react'
 import { useEffect, useState, type CSSProperties } from 'react'
 import { cn } from 'cn'
 import FilterBar, { PinFiltersToggle } from '@/components/filter-bar'
@@ -42,6 +42,19 @@ export const STEP_WORKLIST: Record<number, { flag: string; action: string }> = {
 }
 
 /**
+ * Follow-up samples worth a second look, shown under the follow-up sample step
+ * (Es, 30 Oct 2026): drawn before EAC began, or during it (on or after session
+ * 1 and before session 3). Root-cause troubleshooting: a sample taken mid-course
+ * cannot show what the full course achieved.
+ */
+const SAMPLE_FLAGS: Record<number, { flag: string; label: string }[]> = {
+  7: [
+    { flag: 'trunc_mid', label: 'sampled during EAC, before session 3' },
+    { flag: 'trunc_pre', label: 'sampled before EAC began' },
+  ],
+}
+
+/**
  * Loss is shown only where one step follows directly from another. Extended
  * EAC (4+) is not a drop from session 3, and a follow-up sample is not a drop
  * from EAC, so neither carries one.
@@ -67,11 +80,16 @@ export default function CascadePage({ onOpenWorklist }: { onOpenWorklist?: (flag
   const [err, setErr] = useState<string | null>(null)
   // Stacked female / male by default, as on the main dashboard.
   const [bySex, setBySex] = useState(true)
+  // Worklist sizes, for the flags under a step (the same counts as Worklists).
+  const [counts, setCounts] = useState<Record<string, number | null>>({})
 
   useEffect(() => {
     if (!options) return
     let cancelled = false
     setLoading(true)
+    api<{ flag: string; n: number | null }[]>(`/worklists${query}`)
+      .then((r) => { if (!cancelled) setCounts(Object.fromEntries(r.map((x) => [x.flag, x.n]))) })
+      .catch(() => {})
     api<CascadeStep[]>(`/cascade${query}`)
       .then((r) => { if (!cancelled) { setSteps(r); setErr(null) } })
       .catch((e: unknown) => { if (!cancelled) setErr(e instanceof Error ? e.message : 'Could not load the cascade') })
@@ -111,9 +129,9 @@ export default function CascadePage({ onOpenWorklist }: { onOpenWorklist?: (flag
         // flashing skeletons, so the page does not jump while a filter applies.
         <div className={cn('flex flex-col gap-4 transition-opacity', loading && 'pointer-events-none opacity-60')}
              aria-busy={loading}>
-          <Steps steps={steps} bySex={bySex} setBySex={setBySex} onOpenWorklist={onOpenWorklist} />
+          <Steps steps={steps} bySex={bySex} setBySex={setBySex} onOpenWorklist={onOpenWorklist} counts={counts} />
           <div className="grid gap-4 xl:grid-cols-2">
-            <WhereLost steps={steps} onOpenWorklist={onOpenWorklist} />
+            <WhereLost steps={steps} onOpenWorklist={onOpenWorklist} counts={counts} />
             <Outcome steps={steps} />
           </div>
         </div>
@@ -124,11 +142,12 @@ export default function CascadePage({ onOpenWorklist }: { onOpenWorklist?: (flag
 
 /* ─────────────────────────────────── steps ──────────────────────────────────── */
 
-function Steps({ steps, bySex, setBySex, onOpenWorklist }: {
+function Steps({ steps, bySex, setBySex, onOpenWorklist, counts = {} }: {
   steps: CascadeStep[]
   bySex: boolean
   setBySex: (v: boolean) => void
   onOpenWorklist?: (flag: string) => void
+  counts?: Record<string, number | null>
 }) {
   const C = useChartPalette()
   const N = steps[0]?.n ?? 0
@@ -182,6 +201,18 @@ function Steps({ steps, bySex, setBySex, onOpenWorklist }: {
                       <ArrowRight />
                     </Button>
                   )}
+                  {(SAMPLE_FLAGS[s.step] ?? []).filter((f) => (counts[f.flag] ?? 0) > 0).map((f) => (
+                    <div key={f.flag} className="flex flex-wrap items-center gap-x-2 pl-7 text-xs">
+                      <span className="inline-flex items-center gap-1 font-medium text-warn">
+                        <TriangleAlert className="size-3" aria-hidden />{fmt(counts[f.flag])} {f.label}
+                      </span>
+                      {onOpenWorklist && (
+                        <Button variant="link" size="xs" className="h-auto px-0 text-xs" onClick={() => onOpenWorklist(f.flag)}>
+                          Open worklist<ArrowRight />
+                        </Button>
+                      )}
+                    </div>
+                  ))}
                 </div>
 
                 <StepBar step={s} N={N} bySex={bySex} />
@@ -251,9 +282,10 @@ function Swatch({ color, label }: { color: string; label: string }) {
 
 /* ─────────────────────────────── where it is lost ──────────────────────────── */
 
-function WhereLost({ steps, onOpenWorklist }: {
+function WhereLost({ steps, onOpenWorklist, counts = {} }: {
   steps: CascadeStep[]
   onOpenWorklist?: (flag: string) => void
+  counts?: Record<string, number | null>
 }) {
   const g = (k: number) => steps.find((s) => s.step === k)?.n ?? 0
   const base = steps.some((s) => s.step === BASE) ? g(BASE) : g(1)
@@ -264,7 +296,9 @@ function WhereLost({ steps, onOpenWorklist }: {
     { label: 'Started, stopped before session 3', n: Math.max(0, g(2) - g(4)), flag: 'eac_incomplete' },
     { label: 'At session 3, not yet 30 days on', n: Math.max(0, g(4) - g(6)), pending: true },
     { label: 'Completed EAC, no post-EAC VL sample', n: Math.max(0, g(6) - g(61)), flag: 'awaiting_vl' },
-    { label: 'Still unsuppressed, awaiting DTC review', n: Math.max(0, g(93) - g(10)), flag: 'awaiting_switch' },
+    // the list's own count: it needs completed EAC (decision 24), so it is not 93 minus 10
+    { label: 'Still unsuppressed after completed EAC, awaiting DTC review',
+      n: counts.awaiting_switch ?? Math.max(0, g(93) - g(10)), flag: 'awaiting_switch' },
   ]
   const max = Math.max(1, ...gaps.map((x) => x.n))
 

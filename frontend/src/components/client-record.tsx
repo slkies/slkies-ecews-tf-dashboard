@@ -27,7 +27,12 @@ export interface Episode {
   idx_vl: number | null; idx_samp: string | null; recv_date: string | null; idx_date: string | null
   fy_quarter: string | null
   s1_date: string | null
+  s2_date?: string | null; s3_date?: string | null; s4_date?: string | null
+  /** Completed EAC, no post-EAC sample, next scheduled visit within two months of completion. */
+  vl_at_next_visit?: boolean | null
   eac1: boolean | null; eac2: boolean | null; eac3: boolean | null; eac_extended: boolean | null
+  /** The client's cycle number for this episode, counted from their own episodes. */
+  eac_cycle_no?: number | null
   eac_completed: boolean | null; sessions: number | null; post_eac_vl: boolean | null
   fu_samp: string | null; fu_date: string | null; fu_vl: number | null
   awaiting_result: boolean | null; resuppressed: boolean | null; llv: boolean | null
@@ -39,6 +44,8 @@ export interface ClientRecord {
   sn: string; state: string | null; lga: string | null; facility: string | null
   sex: string | null; age: number | null; art_status: string | null
   regimen_line: string | null; regimen: string | null; art_year: number | null; exit_date: string | null
+  /** From the treatment line list: last ARV pickup, days dispensed, and the visit that implies. */
+  last_pickup?: string | null; days_refill?: number | null; next_visit?: string | null
   first_vl: number | null; first_vl_date: string | null
   first_high_vl: number | null; first_high_date: string | null
   episodes: Episode[]
@@ -192,6 +199,9 @@ export function RecordBody({ rec, wide = false }: { rec: ClientRecord; wide?: bo
           <Fact label="Regimen">{rec.regimen_line ?? DASH}{rec.regimen ? <span className="block text-xs font-normal text-muted-foreground">{rec.regimen}</span> : null}</Fact>
           <Fact label="ART start">{rec.art_year ?? DASH}</Fact>
           {rec.exit_date && <Fact label="Outcome dated">{fmtDate(rec.exit_date)}</Fact>}
+          <Fact label="Last ARV pickup">{fmtDate(rec.last_pickup)}</Fact>
+          <Fact label="Dispensed for">{refill(rec.days_refill)}</Fact>
+          <Fact label="Next scheduled visit">{fmtDate(rec.next_visit)}</Fact>
         </dl>
         {(rec.first_vl != null || rec.first_high_vl != null) && (
           <div className="flex flex-col gap-1 border-t pt-3 text-sm">
@@ -208,18 +218,29 @@ export function RecordBody({ rec, wide = false }: { rec: ClientRecord; wide?: bo
         {rec.episodes.length === 1 ? '1 failure episode' : `${rec.episodes.length} failure episodes`}
       </h3>
       <div className={cn('flex flex-col gap-5', wide && 'grid items-start xl:grid-cols-2')}>
-        {rec.episodes.map((e, i) => <EpisodeCard key={e.episode} e={e} n={rec.episodes.length - i} wide={wide} />)}
+        {rec.episodes.map((e, i) => (
+          <EpisodeCard key={e.episode} e={e} n={rec.episodes.length - i} wide={wide}
+                       nextVisit={i === 0 ? rec.next_visit : null} />
+        ))}
       </div>
     </>
   )
 }
 
-function Step({ done, label }: { done: boolean | null; label: string }) {
+/** Days of ARVs dispensed, with months where it is a whole number of them. */
+function refill(days: number | null | undefined): string {
+  if (days == null) return DASH
+  const m = days / 30
+  return Number.isInteger(m) ? `${fmt(days)} days (${m} month${m === 1 ? '' : 's'})` : `${fmt(days)} days`
+}
+
+function Step({ done, label, date }: { done: boolean | null; label: string; date?: string | null }) {
   return (
     <span className={cn('inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-xs',
                         done ? 'border-transparent bg-good-tint text-good' : 'text-muted-foreground')}>
       {done ? <Check className="size-3" aria-hidden /> : <X className="size-3" aria-hidden />}
-      {label}<span className="sr-only">{done ? ': done' : ': not done'}</span>
+      {label}{date ? <span className="tabular-nums opacity-80"> · {fmtDate(date)}</span> : null}
+      <span className="sr-only">{done ? ': done' : ': not done'}</span>
     </span>
   )
 }
@@ -235,7 +256,20 @@ function outcome(e: Episode): ReactNode {
   return DASH
 }
 
-function EpisodeCard({ e, n, wide = false }: { e: Episode; n: number; wide?: boolean }) {
+/** "in 12 days", "today", "9 days ago", from today. */
+function fromToday(iso: string): string {
+  const days = Math.round((new Date(`${iso.slice(0, 10)}T00:00:00`).getTime() - new Date(new Date().toDateString()).getTime()) / 86_400_000)
+  return days === 0 ? 'today' : days > 0 ? `in ${days} day${days === 1 ? '' : 's'}` : `${-days} day${days === -1 ? '' : 's'} ago`
+}
+
+function EpisodeCard({ e, n, wide = false, nextVisit = null }: {
+  e: Episode; n: number; wide?: boolean
+  /** The client's next scheduled visit; given to the current episode only. */
+  nextVisit?: string | null
+}) {
+  // Completed EAC, no post-EAC sample yet: the visit is when it can be drawn,
+  // so the health worker sees the date without opening the pharmacy record.
+  const vlDue = !!e.eac_completed && !e.post_eac_vl
   const lists = WORKLISTS.filter((w) => e.worklists.includes(w.flag))
   return (
     <section aria-label={`Episode ${n}`} className={cn('flex flex-col gap-3 rounded-xl border p-4', wide && 'bg-card')}>
@@ -250,16 +284,33 @@ function EpisodeCard({ e, n, wide = false }: { e: Episode; n: number; wide?: boo
       </dl>
       <div className="flex flex-col gap-1.5">
         <span className="text-xs text-muted-foreground">
-          EAC{e.s1_date ? `, session 1 on ${fmtDate(e.s1_date)}` : ''}{e.sessions ? ` · ${e.sessions} sessions recorded` : ''}
+          EAC{e.eac_cycle_no ? `, cycle ${e.eac_cycle_no}` : ', this cycle'}{e.sessions ? ` · ${e.sessions} sessions across all cycles` : ''}
         </span>
         <div className="flex flex-wrap gap-1.5">
-          <Step done={e.eac1} label="Session 1" />
-          <Step done={e.eac2} label="Session 2" />
-          <Step done={e.eac3} label="Session 3" />
+          <Step done={e.eac1} label="Session 1" date={e.s1_date} />
+          <Step done={e.eac2} label="Session 2" date={e.s2_date} />
+          <Step done={e.eac3} label="Session 3" date={e.s3_date} />
           <Step done={e.eac_completed} label="Completed" />
-          {e.eac_extended && <Step done label="Extended (4+)" />}
+          {e.eac_extended && <Step done label="Extended, session 4" date={e.s4_date} />}
         </div>
+        {/* A session 4 more than 60 days after session 3 is not this cycle's
+            extended EAC (decision 22), so it is shown but not counted. */}
+        {!e.eac_extended && e.s4_date && (
+          <span className="text-xs text-muted-foreground">
+            Session 4 on {fmtDate(e.s4_date)}, more than 60 days after session 3: not counted as extended EAC.
+          </span>
+        )}
       </div>
+      {vlDue && (
+        <div className="flex flex-col gap-0.5 rounded-lg border border-warn/40 bg-warn-tint px-3 py-2 text-sm">
+          <span className="font-medium text-warn">Post-EAC VL sample due</span>
+          <span>
+            {nextVisit
+              ? <>Next scheduled visit: <span className="font-medium tabular-nums">{fmtDate(nextVisit)}</span> ({fromToday(nextVisit)})</>
+              : 'No next scheduled visit on the treatment line list.'}
+          </span>
+        </div>
+      )}
       <dl className="grid grid-cols-2 gap-x-6 gap-y-3 sm:grid-cols-3">
         <Fact label="Follow-up sample collected">{fmtDate(e.fu_samp)}</Fact>
         <Fact label="Follow-up result received">{fmtDate(e.fu_date)}</Fact>
@@ -268,6 +319,7 @@ function EpisodeCard({ e, n, wide = false }: { e: Episode; n: number; wide?: boo
       <div className="flex flex-wrap items-center gap-2 text-sm">
         {outcome(e)}
         {e.switched && <StatusBadge tone="good">Switched regimen</StatusBadge>}
+        {e.vl_at_next_visit && <StatusBadge tone="warn">VL expected at the next scheduled visit</StatusBadge>}
       </div>
       {e.treatment_plan && <p className="text-sm"><span className="text-muted-foreground">Plan: </span>{e.treatment_plan}</p>}
       {lists.length > 0 && (

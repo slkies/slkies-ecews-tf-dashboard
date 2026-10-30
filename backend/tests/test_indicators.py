@@ -55,7 +55,7 @@ def _idx(sn="0.123456789012345", vl=5000, d="2026-03-01"):
 
 
 def cohort(eac_rows, status="Active", fu_vl=None, fu_samp=None,
-           line="Adult 1st line ARV regimen"):
+           line="Adult 1st line ARV regimen", treatment_extra=None):
     """
     `event` mode is retired: the cohort now always comes from the quarterly
     Total Unsuppressed list. So synthesise the index row each EAC row implies,
@@ -63,6 +63,8 @@ def cohort(eac_rows, status="Active", fu_vl=None, fu_samp=None,
     """
     e = pd.DataFrame(eac_rows)
     t = treat(status=status, fu_vl=fu_vl, fu_samp=fu_samp, line=line)
+    if treatment_extra:
+        t = t.assign(**treatment_extra)
     tu = pd.DataFrame([{
         "S/N": r["S/N"],
         "currentViralLoad": r["EAC_Triggering_High_VL_Value"],
@@ -287,7 +289,7 @@ def test_dtc_repeat_subset_nests_in_still():
     assert s["repeat_still_episodes"] <= s["still"]
     assert s["repeat_still_episodes"] <= s["repeat_episodes"]
     assert s["repeat_still_clients"] <= s["repeat_clients"]
-    assert s["awaiting"] + s["prior"] + s["switched"] == s["still"]
+    assert s["awaiting"] + s["prior"] + s["switched"] + s["not_completed"] == s["still"]
 
 
 # ── small helpers ─────────────────────────────────────────────────────
@@ -498,12 +500,15 @@ def test_repeat_failure_resolves_as_failed_switch_on_the_earlier_episode():
     assert bool(first["still_unsuppressed"]) is True
     assert bool(first["repeat_failure"]) is True
     assert bool(first["switch_eligible"]) is True
-    assert bool(first["awaiting_switch"]) is True
+    # no completed EAC, so not awaiting DTC review (decision 24)
+    assert bool(first["awaiting_switch"]) is False
 
 
 def test_switch_is_read_from_regimen_line():
     """Switched = on 2nd or 3rd line in the treatment list."""
-    e = pd.DataFrame([mk(**{"S/N": "0.1", "Session_1_Date": "2026-03-20"})])
+    # completed EAC, so a 1st-line client still failing is awaiting DTC review
+    e = pd.DataFrame([mk(**{"S/N": "0.1", "Session_1_Date": "2026-03-20",
+                            "Session_2_Date": "2026-04-05", "Session_3_Date": "2026-04-20"})])
     tu = _tu([{"S/N": "0.1", "currentViralLoad": 5000,
                "dateofCurrentViralLoad": "2026-03-01",
                "lastDateOfSampleCollection": "2026-02-25",
@@ -658,3 +663,136 @@ def test_the_risk_list_leaves_out_clients_who_left_care_before_a_retest():
     assert r["n_scored"] == n_pend // 2 and r["n_left_care"] == n_pend // 2
     kept = set(df["sn"][n_train:n_train + n_pend // 2])
     assert {x["sn"] for x in r["lowest_chance"]} == kept
+
+
+# ── decision 22 (30 Oct 2026): extended EAC, samples during EAC, the next visit ──
+_COURSE = dict(Session_1_Date="2026-03-05", Session_2_Date="2026-03-20",
+               Session_3_Date="2026-04-05")
+
+
+@pytest.mark.parametrize("s4, extended", [
+    ("2026-05-05", True),     # 30 days after session 3
+    ("2026-04-28", True),     # 23 days: the monthly rhythm, still this cycle
+    ("2026-06-04", True),     # day 60, the last day that counts
+    ("2026-07-01", False),    # 87 days: not this cycle's extended EAC
+    (None, False),            # no session 4 at all
+])
+def test_extended_eac_counts_only_a_session_4_within_60_days_of_session_3(s4, extended):
+    c = cohort([mk(**_COURSE, Session_4_Extended_Date=s4, Total_EAC_Sessions_All_Cycles=6)])
+    assert bool(c.df.loc[0, "eac_extended"]) is extended
+
+
+def test_sessions_from_earlier_cycles_no_longer_make_eac_extended():
+    """The old rule: Total_EAC_Sessions_All_Cycles >= 4, counting every cycle."""
+    c = cohort([mk(**_COURSE, Total_EAC_Sessions_All_Cycles=9)])
+    assert bool(c.df.loc[0, "eac_extended"]) is False
+
+
+@pytest.mark.parametrize("samp, pre, mid", [
+    ("2026-03-03", True, False),    # before session 1: EAC had not begun
+    ("2026-03-25", False, True),    # between sessions 1 and 3, sessions carried on
+    ("2026-05-10", False, False),   # after session 3: a proper post-EAC sample
+])
+def test_a_follow_up_sample_during_eac_is_flagged_even_if_sessions_carried_on(samp, pre, mid):
+    c = cohort([mk(**_COURSE, Total_EAC_Sessions_All_Cycles=3)], fu_vl=1500, fu_samp=samp)
+    assert bool(c.df.loc[0, "eac_trunc_pre"]) is pre
+    assert bool(c.df.loc[0, "eac_trunc_mid"]) is mid
+
+
+# Session 3 on 20 May: EAC complete from 19 Jun; AS_OF is 11 Jul; no post-EAC sample.
+_DONE = dict(Session_1_Date="2026-04-01", Session_2_Date="2026-04-25",
+             Session_3_Date="2026-05-20", Total_EAC_Sessions_All_Cycles=3)
+
+
+@pytest.mark.parametrize("pickup, days, waiting", [
+    ("2026-06-15", 60, True),     # next visit 14 Aug: within 2 months of completion, still ahead
+    ("2026-06-01", 30, False),    # next visit 1 Jul: already passed, so overdue, not waiting
+    ("2026-06-15", 180, False),   # next visit Dec: too far off to be the reason for waiting
+])
+def test_waiting_for_the_next_visit_is_told_apart_from_overdue(pickup, days, waiting):
+    c = cohort([mk(**_DONE)], treatment_extra={"pharmacyLastPickupdate": pickup, "daysOfArvRefill": days})
+    row = c.df.loc[0]
+    assert bool(row["eac_completed"]) and not bool(row["post_eac_vl"])
+    assert bool(row["vl_at_next_visit"]) is waiting
+    assert row["next_visit"] == pd.Timestamp(pickup) + pd.Timedelta(days=days)
+
+
+def test_the_no_post_eac_vl_list_leaves_out_clients_waiting_for_their_visit():
+    from app import main as M
+    waiting = cohort([mk(**_DONE)], treatment_extra={"pharmacyLastPickupdate": "2026-06-15", "daysOfArvRefill": 60}).df
+    overdue = cohort([mk(**_DONE)], treatment_extra={"pharmacyLastPickupdate": "2026-06-01", "daysOfArvRefill": 30}).df
+    assert bool(M._flag_mask(waiting, "vl_at_next_visit").iloc[0]) and not bool(M._flag_mask(waiting, "awaiting_vl").iloc[0])
+    assert bool(M._flag_mask(overdue, "awaiting_vl").iloc[0]) and not bool(M._flag_mask(overdue, "vl_at_next_visit").iloc[0])
+
+
+# ── each failure episode gets its own EAC cycle (30 Oct 2026) ─────────
+_SN = "0.123456789012345"
+
+
+def _two_episodes(eac_rows):
+    """One client unsuppressed in April 2025 and again in April 2026."""
+    tu = pd.DataFrame([
+        {"S/N": _SN, "currentViralLoad": 27742, "dateofCurrentViralLoad": "2025-04-24",
+         "lastDateOfSampleCollection": "2025-04-24", "dateResultReceivedFacility": "2025-05-02"},
+        {"S/N": _SN, "currentViralLoad": 100761, "dateofCurrentViralLoad": "2026-04-10",
+         "lastDateOfSampleCollection": "2026-04-10", "dateResultReceivedFacility": "2026-04-24"},
+    ])
+    c = build_cohort(tu, treat(), pd.DataFrame(eac_rows), as_of=pd.Timestamp("2026-10-24"), mode="snapshot")
+    return c.df.sort_values("idx_date").reset_index(drop=True)
+
+
+def test_a_later_cycle_is_not_copied_onto_an_earlier_episode():
+    """The reported client: only the June 2026 cycle is on the EAC lists."""
+    d = _two_episodes([mk(**{"S/N": _SN}, Session_1_Date="2026-06-03", Session_2_Date="2026-07-01")])
+    assert pd.isna(d.loc[0, "Session_1_Date"]) and not bool(d.loc[0, "eac1"])
+    assert d.loc[1, "Session_1_Date"] == pd.Timestamp("2026-06-03") and bool(d.loc[1, "eac1"])
+
+
+def test_each_episode_gets_the_cycle_that_followed_it():
+    """An older list still carries the 2025 cycle; the newest carries 2026's."""
+    d = _two_episodes([
+        mk(**{"S/N": _SN}, Session_1_Date="2026-06-03", Session_2_Date="2026-07-01"),       # newest list
+        mk(**{"S/N": _SN}, Session_1_Date="2025-05-20", Session_2_Date="2025-06-18",
+           Session_3_Date="2025-07-16"),                                                    # older list
+    ])
+    assert d.loc[0, "Session_1_Date"] == pd.Timestamp("2025-05-20") and bool(d.loc[0, "eac3"])
+    assert d.loc[1, "Session_1_Date"] == pd.Timestamp("2026-06-03") and not bool(d.loc[1, "eac3"])
+
+
+def test_the_newest_list_wins_for_the_same_cycle():
+    """The same cycle on two lists: the newer has more sessions filled in."""
+    d = _two_episodes([
+        mk(**{"S/N": _SN}, Session_1_Date="2026-06-03", Session_2_Date="2026-07-01",
+           Session_3_Date="2026-07-29"),
+        mk(**{"S/N": _SN}, Session_1_Date="2026-06-03"),
+    ])
+    assert bool(d.loc[1, "eac3"])
+
+
+def test_awaiting_dtc_review_requires_completed_eac():
+    """Decision 24: still failing on 1st line but EAC not completed is an EAC
+    gap, not a committee case."""
+    done = cohort([mk(Session_1_Date="2026-03-05", Session_2_Date="2026-03-20",
+                      Session_3_Date="2026-04-05", Total_EAC_Sessions_All_Cycles=3)],
+                  fu_vl=8000, fu_samp="2026-06-01").df.loc[0]
+    not_done = cohort([mk(Session_1_Date="2026-03-05", Total_EAC_Sessions_All_Cycles=1)],
+                      fu_vl=8000, fu_samp="2026-06-01").df.loc[0]
+    assert bool(done["awaiting_switch"]) is True
+    assert bool(not_done["still_unsuppressed"]) is True and bool(not_done["awaiting_switch"]) is False
+
+
+def test_cycles_are_counted_from_the_clients_own_episodes():
+    """Three counselled episodes: cycle 1, 2, 3. The third still failing is on
+    the more-than-2-cycles list; EAC_Cycle_Number (always 1) is not used."""
+    sn = "0.555555555555"
+    tu = pd.DataFrame([
+        {"S/N": sn, "currentViralLoad": v, "dateofCurrentViralLoad": d,
+         "lastDateOfSampleCollection": d, "dateResultReceivedFacility": d}
+        for v, d in ((5000, "2025-01-10"), (8000, "2025-09-10"), (12000, "2026-04-10"))])
+    eac = pd.DataFrame([
+        mk(**{"S/N": sn}, Session_1_Date=s1, EAC_Cycle_Number=1)
+        for s1 in ("2026-05-01", "2025-10-01", "2025-02-01")])
+    d = build_cohort(tu, treat(sn=sn, fu_vl=9000, fu_samp="2026-08-01"), eac,
+                     as_of=pd.Timestamp("2026-10-24"), mode="snapshot").df.sort_values("idx_date")
+    assert d["eac_cycle_no"].tolist() == [1, 2, 3]
+    assert d["dtc_review"].tolist() == [False, False, True]

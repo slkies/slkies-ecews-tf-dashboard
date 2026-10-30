@@ -52,6 +52,8 @@ VL_UNDETECTABLE = 50    # < this = undetectable
 LLV_HIGH_RISK = 200     # 200-999 -> recommend switch (spec §1.4)
 EAC_MIN_SESSIONS = 3    # spec §1.3
 EAC_COMPLETE_DAYS = 30  # completed = sessions 1-3 plus >=30 days since session 3
+EAC_EXTENDED_MAX_DAYS = 60  # session 4 within this many days of session 3 = extended (Es, 30 Oct 2026)
+VISIT_WINDOW_DAYS = 60      # a scheduled visit this soon after EAC completion: VL likely drawn then
 
 # Socio-demographic level collapsing. Source values are lower-cased/stripped
 # before lookup; anything unmapped or blank falls through to "Not recorded".
@@ -242,6 +244,63 @@ class Cohort:
 
 
 # ── cohort construction ───────────────────────────────────────────────
+# The EAC fields that describe ONE counselling cycle. Everything else read from
+# the EAC list (first-ever and first-high VL) describes the client.
+_CYCLE_COLS = ("Session_1_Date", "Session_2_Date", "Session_3_Date",
+               "Session_4_Extended_Date", "sessions", "cycles",
+               "Session_1_Missed_Drug_Pickups")
+
+
+def _eac_for_episodes(base: pd.DataFrame, e: pd.DataFrame, cols: list[str]) -> pd.DataFrame:
+    """
+    The EAC cycle that belongs to each failure episode, aligned to `base`'s rows.
+
+    A client with two episodes used to receive the same EAC row on both: the EAC
+    lists were cut to one row per client (the newest) and joined on S/N alone.
+    An episode from April 2025 then showed a June 2026 session 1, passed the
+    "session 1 on or after the index" test, and read as counselled and still
+    failing when it never had EAC at all (Es, 30 Oct 2026).
+
+    Now every distinct cycle is kept - one per session 1 date, across all the
+    EAC lists, the newest list's row winning because it has the most sessions
+    filled in - and a cycle is matched to the episode it follows: session 1 on or
+    after that episode's index date and before the client's NEXT index date.
+    Where several fall in that window the first is taken. An episode with no
+    cycle in its window gets the latest cycle that started before its index, so
+    it still reads as "EAC predates the index VL" (not yet commenced), as before.
+    A cycle in a later episode's window is never pulled back onto an earlier one.
+
+    `e` must be newest list first (ingest concatenates it that way).
+    """
+    client_cols = [c for c in cols if c not in _CYCLE_COLS and c != "sn"]
+    cycle_cols = [c for c in cols if c in _CYCLE_COLS]
+
+    ep = pd.DataFrame({"sn": base["sn"].to_numpy(), "idx_date": base["idx_date"].to_numpy(),
+                       "_ep": np.arange(len(base))})
+    ep = ep.sort_values(["sn", "idx_date"])
+    ep["_next"] = ep.groupby("sn")["idx_date"].shift(-1)
+
+    cyc = e[e["Session_1_Date"].notna()].drop_duplicates(["sn", "Session_1_Date"])[["sn", *cycle_cols]]
+    m = ep.merge(cyc, on="sn", how="inner")
+    s1 = m["Session_1_Date"]
+    inwin = (s1 >= m["idx_date"]) & (m["_next"].isna() | (s1 < m["_next"]))
+    before = s1 < m["idx_date"]
+    m = m[(inwin | before).fillna(False)].copy()
+    s1i = m["Session_1_Date"].astype("int64")
+    w = inwin.loc[m.index].fillna(False).to_numpy()
+    # in the window: the earliest session 1; otherwise the latest before the index
+    m["_rank"] = np.where(w, 0, 1)
+    m["_key"] = np.where(w, s1i, -s1i)
+    m = m.sort_values(["_ep", "_rank", "_key"]).drop_duplicates("_ep")
+
+    out = pd.DataFrame(index=np.arange(len(base)))
+    out = out.join(m.set_index("_ep")[cycle_cols])
+    if client_cols:
+        cl = e.drop_duplicates("sn").set_index("sn")[client_cols]
+        out = out.join(cl.reindex(base["sn"].to_numpy()).reset_index(drop=True))
+    return out
+
+
 def build_cohort(
     total_unsuppressed: pd.DataFrame,
     treatment: pd.DataFrame,
@@ -269,7 +328,9 @@ def build_cohort(
     dropped = int(e["sn"].isna().sum() + tu["sn"].isna().sum())
     if dropped:
         warn.append(f"{dropped} rows dropped: blank S/N, cannot be linked.")
-    e = e.dropna(subset=["sn"]).drop_duplicates("sn")
+    # Every row is kept: a client's earlier EAC cycle is often still on an older
+    # list, and each episode is matched to its own cycle below.
+    e = e.dropna(subset=["sn"])
     tu = tu.dropna(subset=["sn"])
 
     # ---- the unit of analysis is a FAILURE EPISODE, not a client -------------
@@ -397,7 +458,8 @@ def build_cohort(
         "First_Ever_VL_Value", "First_Ever_VL_Result_Date",
         "First_High_VL_Value", "First_High_VL_Result_Date",
     ) if c in e]
-    df = base.merge(e[ecols], on="sn", how="left")
+    base = base.reset_index(drop=True)
+    df = base.join(_eac_for_episodes(base, e, ecols))
 
     t = treatment.dropna(subset=["sn"]).drop_duplicates("sn")
     tcols = {"state": "state", "lga": "lga", "facilityName": "facility",
@@ -425,6 +487,10 @@ def build_cohort(
              "outcomesDate": "outcome_date",
              "pharmacyLastPickupdate": "last_pickup",
              "daysOfArvRefill": "days_refill",
+             # The pharmacy's own next appointment: the fallback when pickup
+             # plus refill days cannot be computed (it agrees within a week
+             # 92% of the time on the 24 Oct list).
+             "EstimatedNextAppointmentPharmacy": "next_appt_pharm",
              # residence (free-text in the EMR - normalised only at map time)
              "lgaOfResidence": "lga_res", "stateOfResidence": "state_res"}
     # Resolve the mapping case-insensitively. The export renames columns between
@@ -582,7 +648,14 @@ def build_cohort(
     df["eac1"] = v
     df["eac2"] = v & df["Session_2_Date"].notna()
     df["eac3"] = v & df["Session_3_Date"].notna()
-    df["eac_extended"] = v & (df["sessions"] >= 4)
+    # Extended EAC counts a session 4 only in THIS cycle: dated within 60 days
+    # of the index cycle's session 3 (Es, 30 Oct 2026). It used to be
+    # Total_EAC_Sessions_All_Cycles >= 4, which counts earlier cycles' sessions
+    # - 4,582 rows on the 24 Oct EAC list, of which only 1,751 had a session 4
+    # date at all. Sessions run monthly (median gap 31 days), so a session at
+    # day 28 is the normal rhythm and counts; one after day 60 does not.
+    gap4 = (df["Session_4_Extended_Date"] - df["Session_3_Date"]).dt.days
+    df["eac_extended"] = (v & df["eac3"] & gap4.between(0, EAC_EXTENDED_MAX_DAYS)).fillna(False).astype(bool)
     # eac_completed is defined further down: it now requires a follow-up VL SAMPLE
     # collected on/after session 3, so it must wait until fu_samp is known.
 
@@ -709,6 +782,28 @@ def build_cohort(
         eac123 & ((as_of - df["Session_3_Date"]).dt.days >= EAC_COMPLETE_DAYS)
     ).fillna(False).astype(bool)
 
+    # -- PICKUP AND THE NEXT SCHEDULED VISIT (Es, 30 Oct 2026) -------------
+    # Clients whose next scheduled visit falls within two months of finishing
+    # EAC often wait for that visit to have the post-EAC VL drawn, rather than
+    # make a separate trip. They are not overdue in the same sense as a client
+    # with no visit in sight, so they get their own worklist. Next visit = last
+    # pickup + days of ARVs dispensed, else the pharmacy's own estimate. The
+    # visit must still be ahead: one that has passed with no sample is overdue.
+    lp = pd.to_datetime(_col(df, "last_pickup"), errors="coerce")
+    refill = pd.to_numeric(_col(df, "days_refill"), errors="coerce")
+    calc = lp + pd.to_timedelta(refill, unit="D")
+    df["last_pickup"] = lp
+    df["days_refill"] = refill
+    df["next_visit"] = calc.where(calc.notna(),
+                                  pd.to_datetime(_col(df, "next_appt_pharm"), errors="coerce"))
+    done_on = df["Session_3_Date"] + pd.Timedelta(days=EAC_COMPLETE_DAYS)
+    nv = df["next_visit"]
+    df["vl_at_next_visit"] = (
+        df["eac_completed"] & ~df["post_eac_vl"] & nv.notna()
+        & (nv >= done_on) & (nv <= done_on + pd.Timedelta(days=VISIT_WINDOW_DAYS))
+        & (nv >= as_of)
+    ).fillna(False).astype(bool)
+
     df["resuppressed"] = df["post_result"] & (df["fu_vl"] < VL_FAIL)
     df["undetectable"] = df["post_result"] & (df["fu_vl"] < VL_UNDETECTABLE)
     df["llv"] = df["post_result"] & df["fu_vl"].between(VL_UNDETECTABLE, VL_FAIL - 1)
@@ -734,8 +829,12 @@ def build_cohort(
     df["switch_eligible"] = (su & ~df["idx_on_2nd"]).fillna(False).astype(bool)
     df["switched"] = (su & ~df["idx_on_2nd"] & df["on_second_line"]).fillna(False).astype(bool)
     df["prior_switch"] = (su & df["idx_on_2nd"]).fillna(False).astype(bool)
-    df["awaiting_switch"] = (su & ~df["idx_on_2nd"]
-                             & ~df["on_second_line"]).fillna(False).astype(bool)
+    # Awaiting DTC review also requires COMPLETED EAC (decision 24): the list is
+    # "still unsuppressed after EAC", and a client who never finished EAC needs
+    # the EAC, not the committee. Those are on the EAC lists already, and are
+    # counted below as "EAC not completed" so the four groups add up.
+    df["awaiting_switch"] = (su & ~df["idx_on_2nd"] & ~df["on_second_line"]
+                             & df["eac_completed"]).fillna(False).astype(bool)
 
     samp = df["fu_samp"]
     res = df["fu_samp"]      # sample date is the clock for post-EAC timing
@@ -763,17 +862,27 @@ def build_cohort(
     df["eac_trunc_pre"] = (
         samp.notna() & s1.notna() & (samp < s1)
     ).fillna(False).astype(bool)
+    # MID: any follow-up sample on or after session 1 and before session 3
+    # (Es, 30 Oct 2026), whether or not counselling carried on afterwards. The
+    # earlier rule caught it only when a later session was then never held, so
+    # a client who kept attending after a mid-cycle retest was invisible.
+    s3 = df["Session_3_Date"]
     df["eac_trunc_mid"] = (
-        samp.notna()
-        & (
-            (samp > s1) & df["Session_2_Date"].isna()
-            | (samp > df["Session_2_Date"]) & df["Session_3_Date"].isna()
-        )
+        samp.notna() & s1.notna() & (samp >= s1) & (s3.isna() | (samp < s3))
     ).fillna(False).astype(bool)
     df["eac_truncated"] = (df["eac_trunc_pre"] | df["eac_trunc_mid"])
 
-    # spec §2.3 rule 4 / §10.2
-    df["dtc_review"] = (df["cycles"] > 2) & ~df["resuppressed"].astype(bool)
+    # spec §2.3 rule 4 / §10.2 - more than 2 EAC cycles, still failing.
+    # The cycle number is counted from the client's own episodes (Es, 30 Oct
+    # 2026): each episode carries its own cycle since decision 23, so a client's
+    # 1st, 2nd, 3rd counselled episode is their cycle 1, 2, 3. The export's
+    # EAC_Cycle_Number cannot be used - it reads 1 (or a corrupted 1/0/1900) for
+    # every client, which left this list permanently empty.
+    order = df.sort_values(["sn", "idx_date"]).index
+    eac1 = df["eac1"].fillna(False).astype(bool)
+    cum = eac1.loc[order].astype(int).groupby(df.loc[order, "sn"]).cumsum()
+    df["eac_cycle_no"] = cum.reindex(df.index).where(eac1)
+    df["dtc_review"] = ((df["eac_cycle_no"] > 2) & ~df["resuppressed"].astype(bool)).fillna(False).astype(bool)
 
     # --- §5: time-dependent ---------------------------------------------
     # A negative interval here means the sample predates session 1 - that cycle
@@ -1869,6 +1978,22 @@ def dtc_review(df: pd.DataFrame) -> dict:
     switched = df["switched"].fillna(False).astype(bool)
     awaiting = df["awaiting_switch"].fillna(False).astype(bool)
     prior = df.get("prior_switch", pd.Series(False, index=df.index)).fillna(False).astype(bool)
+    # still >= 1,000, 1st line, not switched, EAC not completed (decision 24)
+    not_done = still & ~awaiting & ~prior & ~switched
+
+    # Outcome of a completed cycle by which cycle it was for the client: a
+    # second cycle re-suppresses far less often than a first (Es, 30 Oct 2026).
+    by_cycle = []
+    if "eac_cycle_no" in df:
+        cno = pd.to_numeric(df["eac_cycle_no"], errors="coerce")
+        done = (df["eac_completed"].fillna(False).astype(bool)
+                & df["post_result"].fillna(False).astype(bool))
+        ok = df["resuppressed"].fillna(False).astype(bool)
+        for label, m in (("Cycle 1", cno.eq(1)), ("Cycle 2", cno.eq(2)), ("Cycle 3 or later", cno.ge(3))):
+            m = (m.fillna(False) & done)
+            nn, rr = int(m.sum()), int((m & ok).sum())
+            by_cycle.append({"cycle": label, "n": nn, "resuppressed": rr,
+                             "pct": round(rr / nn * 100, 1) if nn else None})
     dtc = df["dtc_review"].fillna(False).astype(bool)
 
     d = df.assign(
@@ -1879,7 +2004,7 @@ def dtc_review(df: pd.DataFrame) -> dict:
                       "2nd/3rd line", "1st line"),
         _cd4=_col(df, "cd4_band"),
         _vl=_col(df, "vl_magnitude"),
-        _still=still, _await=awaiting, _switched=switched, _prior=prior)
+        _still=still, _await=awaiting, _switched=switched, _prior=prior, _notdone=not_done)
 
     def rate(a, b):
         return round(a / b * 100, 1) if b else None
@@ -1918,8 +2043,9 @@ def dtc_review(df: pd.DataFrame) -> dict:
             aw = int(g.loc[m, "_await"].sum())
             sw = int(g.loc[m, "_switched"].sum())
             pr = int(g.loc[m, "_prior"].sum())
+            nd = int(g.loc[m, "_notdone"].sum())
             out.append({"level": lv, "still": ns, "awaiting": aw, "switched": sw,
-                        "prior": pr, "pct_awaiting": rate(aw, ns)})
+                        "prior": pr, "not_completed": nd, "pct_awaiting": rate(aw, ns)})
         return out
 
     mu = pd.to_numeric(d["months_unsuppressed"], errors="coerce")
@@ -1945,13 +2071,16 @@ def dtc_review(df: pd.DataFrame) -> dict:
             "switched": int(switched.sum()),
             "awaiting": int(awaiting.sum()),
             "prior": int(prior.sum()),
+            "not_completed": int(not_done.sum()),
             "dtc_flag": int(dtc.sum()),
         },
+        "by_cycle": by_cycle,
         "repeat_assoc": {"n": int(rep.sum()), "pct": rate(int(rep.sum()), n),
                          "variables": assoc},
         "switch_gap": {
             "n_still": int(still.sum()), "awaiting": int(awaiting.sum()),
             "switched": int(switched.sum()), "prior": int(prior.sum()),
+            "not_completed": int(not_done.sum()),
             "by_state": gap_by("state", states),
             "by_regimen": gap_by("_reg", ["1st line", "2nd/3rd line"]),
             "by_months": gap_by("_mub", ["<3 mo", "3-6 mo", "6-12 mo", "12+ mo"]),
