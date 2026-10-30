@@ -779,3 +779,20 @@ def test_awaiting_dtc_review_requires_completed_eac():
                       fu_vl=8000, fu_samp="2026-06-01").df.loc[0]
     assert bool(done["awaiting_switch"]) is True
     assert bool(not_done["still_unsuppressed"]) is True and bool(not_done["awaiting_switch"]) is False
+
+
+def test_cycles_are_counted_from_the_clients_own_episodes():
+    """Three counselled episodes: cycle 1, 2, 3. The third still failing is on
+    the more-than-2-cycles list; EAC_Cycle_Number (always 1) is not used."""
+    sn = "0.555555555555"
+    tu = pd.DataFrame([
+        {"S/N": sn, "currentViralLoad": v, "dateofCurrentViralLoad": d,
+         "lastDateOfSampleCollection": d, "dateResultReceivedFacility": d}
+        for v, d in ((5000, "2025-01-10"), (8000, "2025-09-10"), (12000, "2026-04-10"))])
+    eac = pd.DataFrame([
+        mk(**{"S/N": sn}, Session_1_Date=s1, EAC_Cycle_Number=1)
+        for s1 in ("2026-05-01", "2025-10-01", "2025-02-01")])
+    d = build_cohort(tu, treat(sn=sn, fu_vl=9000, fu_samp="2026-08-01"), eac,
+                     as_of=pd.Timestamp("2026-10-24"), mode="snapshot").df.sort_values("idx_date")
+    assert d["eac_cycle_no"].tolist() == [1, 2, 3]
+    assert d["dtc_review"].tolist() == [False, False, True]

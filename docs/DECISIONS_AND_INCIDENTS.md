@@ -474,3 +474,19 @@ so an episode with no EAC could sit on the highest-priority list (Es). It now
 also requires completed EAC. Those without it are the EAC lists' work, and are
 shown wherever the still-unsuppressed group is split, as *EAC not completed*, so
 awaiting + prior switch + switched + EAC not completed = still at or above 1,000.
+
+## 25. EAC cycles are counted from the client's own episodes
+**30 Oct 2026** — The export's `EAC_Cycle_Number` reads 1 (or 0, or `1/0/1900`) for
+every client, so *More than 2 EAC cycles, still failing* was always empty. Since
+decision 23 each episode carries its own cycle, so a client's 1st, 2nd and 3rd
+counselled episodes are their cycles 1, 2 and 3. That number drives the list (a
+third or later cycle, not re-suppressed: 6 clients on the 24 Oct line list) and the
+patient page's "cycle N", and DTC review shows re-suppression by cycle: 85.6% after a
+first completed cycle, 57.1% after a second (8 of 14).
+
+DTC review also shows, per client, how many months the latest viral load would take
+to fall below 1,000 **if** it fell one log a month (Es). It is arithmetic on that
+stated assumption, labelled as such, not a forecast: the line list carries one VL per
+client, so there is no per-client trend to fit, and response is near all-or-nothing
+(median fall 3.3 log among those who re-suppressed, -0.1 among those who did not).
+

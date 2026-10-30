@@ -31,6 +31,8 @@ export interface Episode {
   /** Completed EAC, no post-EAC sample, next scheduled visit within two months of completion. */
   vl_at_next_visit?: boolean | null
   eac1: boolean | null; eac2: boolean | null; eac3: boolean | null; eac_extended: boolean | null
+  /** The client's cycle number for this episode, counted from their own episodes. */
+  eac_cycle_no?: number | null
   eac_completed: boolean | null; sessions: number | null; post_eac_vl: boolean | null
   fu_samp: string | null; fu_date: string | null; fu_vl: number | null
   awaiting_result: boolean | null; resuppressed: boolean | null; llv: boolean | null
@@ -282,7 +284,7 @@ function EpisodeCard({ e, n, wide = false, nextVisit = null }: {
       </dl>
       <div className="flex flex-col gap-1.5">
         <span className="text-xs text-muted-foreground">
-          EAC, this cycle{e.sessions ? ` · ${e.sessions} sessions across all cycles` : ''}
+          EAC{e.eac_cycle_no ? `, cycle ${e.eac_cycle_no}` : ', this cycle'}{e.sessions ? ` · ${e.sessions} sessions across all cycles` : ''}
         </span>
         <div className="flex flex-wrap gap-1.5">
           <Step done={e.eac1} label="Session 1" date={e.s1_date} />

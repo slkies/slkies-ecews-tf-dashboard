@@ -872,8 +872,17 @@ def build_cohort(
     ).fillna(False).astype(bool)
     df["eac_truncated"] = (df["eac_trunc_pre"] | df["eac_trunc_mid"])
 
-    # spec §2.3 rule 4 / §10.2
-    df["dtc_review"] = (df["cycles"] > 2) & ~df["resuppressed"].astype(bool)
+    # spec §2.3 rule 4 / §10.2 - more than 2 EAC cycles, still failing.
+    # The cycle number is counted from the client's own episodes (Es, 30 Oct
+    # 2026): each episode carries its own cycle since decision 23, so a client's
+    # 1st, 2nd, 3rd counselled episode is their cycle 1, 2, 3. The export's
+    # EAC_Cycle_Number cannot be used - it reads 1 (or a corrupted 1/0/1900) for
+    # every client, which left this list permanently empty.
+    order = df.sort_values(["sn", "idx_date"]).index
+    eac1 = df["eac1"].fillna(False).astype(bool)
+    cum = eac1.loc[order].astype(int).groupby(df.loc[order, "sn"]).cumsum()
+    df["eac_cycle_no"] = cum.reindex(df.index).where(eac1)
+    df["dtc_review"] = ((df["eac_cycle_no"] > 2) & ~df["resuppressed"].astype(bool)).fillna(False).astype(bool)
 
     # --- §5: time-dependent ---------------------------------------------
     # A negative interval here means the sample predates session 1 - that cycle
@@ -1971,6 +1980,20 @@ def dtc_review(df: pd.DataFrame) -> dict:
     prior = df.get("prior_switch", pd.Series(False, index=df.index)).fillna(False).astype(bool)
     # still >= 1,000, 1st line, not switched, EAC not completed (decision 24)
     not_done = still & ~awaiting & ~prior & ~switched
+
+    # Outcome of a completed cycle by which cycle it was for the client: a
+    # second cycle re-suppresses far less often than a first (Es, 30 Oct 2026).
+    by_cycle = []
+    if "eac_cycle_no" in df:
+        cno = pd.to_numeric(df["eac_cycle_no"], errors="coerce")
+        done = (df["eac_completed"].fillna(False).astype(bool)
+                & df["post_result"].fillna(False).astype(bool))
+        ok = df["resuppressed"].fillna(False).astype(bool)
+        for label, m in (("Cycle 1", cno.eq(1)), ("Cycle 2", cno.eq(2)), ("Cycle 3 or later", cno.ge(3))):
+            m = (m.fillna(False) & done)
+            nn, rr = int(m.sum()), int((m & ok).sum())
+            by_cycle.append({"cycle": label, "n": nn, "resuppressed": rr,
+                             "pct": round(rr / nn * 100, 1) if nn else None})
     dtc = df["dtc_review"].fillna(False).astype(bool)
 
     d = df.assign(
@@ -2051,6 +2074,7 @@ def dtc_review(df: pd.DataFrame) -> dict:
             "not_completed": int(not_done.sum()),
             "dtc_flag": int(dtc.sum()),
         },
+        "by_cycle": by_cycle,
         "repeat_assoc": {"n": int(rep.sum()), "pct": rate(int(rep.sum()), n),
                          "variables": assoc},
         "switch_gap": {

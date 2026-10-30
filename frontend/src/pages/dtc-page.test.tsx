@@ -10,7 +10,7 @@ import { FilterProvider } from '@/core/filters'
 import { SessionProvider } from '@/core/session'
 import { ThemeProvider } from '@/core/theme'
 import { AWAITING, DTC, TRAJ } from '@/dev/dtc-fixture'
-import DtcPage, { vlShort } from './dtc-page'
+import DtcPage, { monthsToBelow1000, vlShort } from './dtc-page'
 
 const OPTIONS = {
   states: ['Delta'], lgas: [], lga_res: [], facilities: [], age_bands: [], quarters: [],
@@ -46,6 +46,25 @@ const ready = () => screen.findByText('completed EAC, 1st line at index, still 1
 const section = (t: RegExp) => screen.getByRole('heading', { name: t }).closest('section')!
 
 describe('DTC review page', () => {
+  it('counts the months to below 1,000 if the viral load fell one log a month', () => {
+    expect(monthsToBelow1000(100761)).toBe(3)   // 10,076 -> 1,008 -> 101
+    expect(monthsToBelow1000(1000)).toBe(1)     // 1,000 is not below 1,000
+    expect(monthsToBelow1000(9999)).toBe(1)
+    expect(monthsToBelow1000(10000)).toBe(2)
+    expect(monthsToBelow1000(850)).toBe(0)
+    expect(monthsToBelow1000(null)).toBeNull()
+  })
+
+  it('draws each client projection, and the re-suppression rate by cycle', async () => {
+    mock()
+    draw()
+    await ready()
+    const latest = TRAJ.rows[0]!.latest_vl!
+    expect(screen.getAllByRole('img', { name: new RegExp(`From ${latest.toLocaleString('en-GB')}, falling one log a month: below 1,000 in ${monthsToBelow1000(latest)} month`) }).length).toBeGreaterThan(0)
+    expect(screen.getByText('Re-suppression by EAC cycle')).toBeInTheDocument()
+    expect(screen.getByText(/8 of 14/)).toBeInTheDocument()
+  })
+
   it('shortens viral loads the way clinicians read them', () => {
     expect(vlShort(412000)).toBe('412k')
     expect(vlShort(1_200_000)).toBe('1.2M')

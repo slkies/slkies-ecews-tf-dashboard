@@ -168,6 +168,8 @@ ALTER TABLE cohort ADD COLUMN IF NOT EXISTS last_pickup      DATE;
 ALTER TABLE cohort ADD COLUMN IF NOT EXISTS days_refill      NUMERIC;
 ALTER TABLE cohort ADD COLUMN IF NOT EXISTS next_visit       DATE;
 ALTER TABLE cohort ADD COLUMN IF NOT EXISTS vl_at_next_visit BOOLEAN;
+-- the client's cycle number, counted from their own episodes (30 Oct 2026)
+ALTER TABLE cohort ADD COLUMN IF NOT EXISTS eac_cycle_no     INTEGER;
 
 CREATE INDEX IF NOT EXISTS cohort_lga_res ON cohort(upload_id, lga_res_norm);
 

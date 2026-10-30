@@ -206,10 +206,10 @@ Previous snapshot: 14 Aug 2026 (4,228 episodes). Line list changes compares the 
 bulk user creation by spreadsheet (the HI team will handle accounts).
 
 **For the HI / EMR team**
-1. **`EAC_Cycle_Number` is unusable.** In the 16 Oct line list every episode reads
-   cycle 1 (or 0, or a corrupted `1/0/1900`), so the High-priority worklist "More than
-   2 EAC cycles, still failing" can never fill: it shows 0. Fixing the column, or
-   agreeing to count cycles another way, is needed before that list means anything.
+1. **`EAC_Cycle_Number` is unusable** (every episode reads 1, 0 or `1/0/1900`). No longer
+   blocking: since 30 Oct the dashboard counts a client's cycles from their own episodes
+   (decision 25), so "More than 2 EAC cycles, still failing" works. Worth fixing at
+   source all the same.
 2. **14 people are Active at more than one facility** (22 Oct pipeline run). They are
    not linked; the list is `SN_Key-TWO-ACTIVE.csv` on Es's machine. HI to close the
    duplicate record.

@@ -486,7 +486,7 @@ COHORT_COLS = [
     "treatment_plan", "episode", "enrol_quarter", "fy",
     "first_vl", "first_vl_date", "first_high_vl", "first_high_date",
     "s2_date", "s3_date", "s4_date", "last_pickup", "days_refill", "next_visit",
-    "vl_at_next_visit",
+    "vl_at_next_visit", "eac_cycle_no",
 ]
 
 

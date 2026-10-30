@@ -36,6 +36,8 @@ export interface Dtc {
   ok: boolean
   summary: { repeat_clients: number; repeat_still_clients: number; repeat_still_episodes: number
     still: number; switched: number; awaiting: number; prior: number; not_completed?: number; dtc_flag: number }
+  /** Re-suppression after a completed cycle, by the client's cycle number. */
+  by_cycle?: CycleOutcome[]
   repeat_assoc: { n: number; pct: number | null; variables: { label: string; levels: OrLevel[] }[] }
   switch_gap: { n_still: number; by_state: GapRow[]; by_regimen: GapRow[]; by_months: GapRow[]; by_cd4: GapRow[] }
   log_drop: { ok: boolean; n: number; median?: number; no_response_completed_eac?: number
@@ -55,6 +57,7 @@ export interface TrajRow {
   n_results: number; latest_vl: number | null; latest_date: string | null; pattern: string
 }
 export interface Trajectory { ok: boolean; n: number; shown?: number; rows: TrajRow[] }
+export interface CycleOutcome { cycle: string; n: number; resuppressed: number; pct: number | null }
 
 /* ─────────────────────────────────── helpers ───────────────────────────────── */
 
@@ -64,6 +67,40 @@ export function vlShort(v: number | null | undefined): string {
   if (v >= 1e6) return `${(v / 1e6).toFixed(1).replace(/\.0$/, '')}M`
   if (v >= 1e3) return `${Math.round(v / 1e3)}k`
   return String(Math.round(v))
+}
+
+/**
+ * Months for a viral load to fall below 1,000 copies/mL IF it fell by one log
+ * (tenfold) every month (Es, 30 Oct 2026). Not a prediction: arithmetic on a
+ * stated assumption, to give the DTC a sense of scale. 100,761 -> 10,076 ->
+ * 1,008 -> 101 is 3 months. A value already below 1,000 needs 0.
+ */
+export function monthsToBelow1000(vl: number | null | undefined): number | null {
+  if (vl == null || vl <= 0) return null
+  if (vl < 1000) return 0
+  return Math.floor(Math.log10(vl) - 3) + 1
+}
+
+/** The projection as a small falling line, log scale, with 1,000 dashed. */
+function DropTrend({ vl }: { vl: number | null }) {
+  const months = monthsToBelow1000(vl)
+  if (vl == null || months == null) return <span className="text-muted-foreground">{DASH}</span>
+  if (months === 0) return <span className="text-muted-foreground">Below 1,000</span>
+  const W = 64, H = 22, top = Math.log10(vl), bottom = Math.min(top - months, 2.5)
+  const y = (lg: number) => 2 + (top - lg) / (top - bottom) * (H - 4)
+  const x = (m: number) => 2 + m / months * (W - 4)
+  const pts = Array.from({ length: months + 1 }, (_, m) => `${x(m).toFixed(1)},${y(top - m).toFixed(1)}`).join(' ')
+  return (
+    <span className="flex items-center gap-2" role="img"
+          aria-label={`From ${fmt(vl)}, falling one log a month: below 1,000 in ${months} month${months === 1 ? '' : 's'}`}>
+      <svg width={W} height={H} viewBox={`0 0 ${W} ${H}`} aria-hidden className="shrink-0">
+        <line x1="0" x2={W} y1={y(3)} y2={y(3)} stroke="var(--muted-foreground)" strokeWidth="1" strokeDasharray="2 2" />
+        <polyline points={pts} fill="none" stroke="var(--bad)" strokeWidth="1.5" strokeLinejoin="round" />
+        <circle cx={x(months)} cy={y(top - months)} r="2.2" fill="var(--good)" />
+      </svg>
+      <span className="font-medium tabular-nums whitespace-nowrap">{months} mo</span>
+    </span>
+  )
 }
 
 /** The shape of a VL history. Rebound and sharp rise are the switch signals. */
@@ -204,6 +241,8 @@ function useTrajectoryColumns() {
     }),
     col.accessor('eac_stage', {
       header: ({ column }) => <SortableHeader column={column} title="EAC" />,
+      // wraps, so "Commenced, not completed" does not set the table's width
+      cell: ({ getValue }) => <span className="block max-w-[8rem] whitespace-normal">{getValue()}</span>,
     }),
     col.display({
       id: 'trajectory',
@@ -234,10 +273,15 @@ function useTrajectoryColumns() {
         </span>
       ),
     }),
+    col.accessor((r) => monthsToBelow1000(r.latest_vl), {
+      id: 'to_1000',
+      header: ({ column }) => <SortableHeader column={column} title="Months to < 1,000" />,
+      cell: ({ row }) => <DropTrend vl={row.original.latest_vl} />,
+    }),
     col.accessor('pattern', {
       header: ({ column }) => <SortableHeader column={column} title="Pattern" />,
       cell: ({ getValue }) => (
-        <span className={cn('rounded-md px-1.5 py-0.5 text-[11px] font-medium whitespace-nowrap',
+        <span className={cn('inline-block max-w-[8rem] rounded-md px-1.5 py-0.5 text-[11px] font-medium',
                             PATTERN_TONE[getValue()] ?? 'bg-muted text-muted-foreground')}>
           {getValue()}
         </span>
@@ -491,12 +535,14 @@ export default function DtcPage({ onOpenWorklist }: { onOpenWorklist?: (flag: st
                 <p className="text-xs text-muted-foreground">
                   {fmt(traj.n)} episodes still unsuppressed; the {fmt(traj.shown ?? traj.rows.length)} with the
                   highest current viral load are listed. {fmt(oneResult)} have only one result on record, so
-                  their trajectory cannot be read yet.
+                  their trajectory cannot be read yet. Months to &lt; 1,000 is how long the latest viral load
+                  would take to fall below 1,000 if it fell one log (tenfold) every month: arithmetic on that
+                  assumption, not a forecast.
                 </p>
                 <DataTable key={query} columns={columns} data={traj.rows}
                            searchText={(r) => `${r.facility ?? ''} ${r.sn}`}
                            searchPlaceholder="Search facility or S/N" caption="Viral load trajectories"
-                           columnLabels={{ facility: 'Facility', eac_stage: 'EAC', trajectory: 'Trajectory', latest_vl: 'Latest VL', pattern: 'Pattern' }}
+                           columnLabels={{ facility: 'Facility', eac_stage: 'EAC', trajectory: 'Trajectory', latest_vl: 'Latest VL', to_1000: 'Months to < 1,000 at 1 log/month', pattern: 'Pattern' }}
                            emptyText="No facility or S/N matches that search." />
               </>
             ) : <p className="py-6 text-center text-sm text-muted-foreground">No clients match this selection.</p>}
@@ -551,6 +597,30 @@ export default function DtcPage({ onOpenWorklist }: { onOpenWorklist?: (flag: st
           </CardContent>
         </Card>
       </Section>
+
+      {(d.by_cycle?.length ?? 0) > 0 && (
+        <Section eyebrow="Cycles" title="Re-suppression by EAC cycle"
+                 description="Of completed cycles with a follow-up result, how many re-suppressed, by which cycle it was for the client. Cycles are counted from each client's own episodes. A second cycle succeeds far less often than a first, which is why failure after a completed cycle goes to the DTC rather than another round of EAC.">
+          <Card className="min-w-0">
+            <CardContent className="flex flex-col gap-4">
+              {d.by_cycle!.map((c) => (
+                <div key={c.cycle} className="flex flex-col gap-1.5">
+                  <div className="flex items-baseline justify-between gap-3 text-sm">
+                    <span>{c.cycle}</span>
+                    <span className="tabular-nums">
+                      <span className="font-medium">{c.pct == null ? DASH : `${c.pct}%`}</span>
+                      <span className="text-muted-foreground"> re-suppressed, {fmt(c.resuppressed)} of {fmt(c.n)}</span>
+                    </span>
+                  </div>
+                  <span className="h-[18px] w-full overflow-hidden rounded-[5px] bg-muted" aria-hidden>
+                    <span className="block h-full rounded-[5px] bg-[var(--icon)]" style={{ width: `${c.pct ?? 0}%` }} />
+                  </span>
+                </div>
+              ))}
+            </CardContent>
+          </Card>
+        </Section>
+      )}
 
       <Section eyebrow="Act" title="Intervention worklists"
                description="The episodes a DTC needs to see. Each opens its worklist under the current filters.">

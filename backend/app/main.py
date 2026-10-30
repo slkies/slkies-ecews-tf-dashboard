@@ -782,7 +782,7 @@ _RECORD_CLIENT = ["sn", "state", "lga", "facility", "sex", "age", "art_status",
                   "first_vl", "first_vl_date", "first_high_vl", "first_high_date"]
 _RECORD_EPISODE = ["episode", "idx_vl", "idx_samp", "recv_date", "idx_date",
                    "fy_quarter", "s1_date", "s2_date", "s3_date", "s4_date",
-                   "eac1", "eac2", "eac3", "eac_extended", "vl_at_next_visit",
+                   "eac1", "eac2", "eac3", "eac_extended", "vl_at_next_visit", "eac_cycle_no",
                    "eac_completed", "sessions", "post_eac_vl", "fu_samp", "fu_date",
                    "fu_vl", "awaiting_result", "resuppressed", "llv",
                    "still_unsuppressed", "switched", "months_unsuppressed",
