@@ -289,7 +289,7 @@ def test_dtc_repeat_subset_nests_in_still():
     assert s["repeat_still_episodes"] <= s["still"]
     assert s["repeat_still_episodes"] <= s["repeat_episodes"]
     assert s["repeat_still_clients"] <= s["repeat_clients"]
-    assert s["awaiting"] + s["prior"] + s["switched"] == s["still"]
+    assert s["awaiting"] + s["prior"] + s["switched"] + s["not_completed"] == s["still"]
 
 
 # ── small helpers ─────────────────────────────────────────────────────
@@ -500,12 +500,15 @@ def test_repeat_failure_resolves_as_failed_switch_on_the_earlier_episode():
     assert bool(first["still_unsuppressed"]) is True
     assert bool(first["repeat_failure"]) is True
     assert bool(first["switch_eligible"]) is True
-    assert bool(first["awaiting_switch"]) is True
+    # no completed EAC, so not awaiting DTC review (decision 24)
+    assert bool(first["awaiting_switch"]) is False
 
 
 def test_switch_is_read_from_regimen_line():
     """Switched = on 2nd or 3rd line in the treatment list."""
-    e = pd.DataFrame([mk(**{"S/N": "0.1", "Session_1_Date": "2026-03-20"})])
+    # completed EAC, so a 1st-line client still failing is awaiting DTC review
+    e = pd.DataFrame([mk(**{"S/N": "0.1", "Session_1_Date": "2026-03-20",
+                            "Session_2_Date": "2026-04-05", "Session_3_Date": "2026-04-20"})])
     tu = _tu([{"S/N": "0.1", "currentViralLoad": 5000,
                "dateofCurrentViralLoad": "2026-03-01",
                "lastDateOfSampleCollection": "2026-02-25",
@@ -765,3 +768,14 @@ def test_the_newest_list_wins_for_the_same_cycle():
     ])
     assert bool(d.loc[1, "eac3"])
 
+
+def test_awaiting_dtc_review_requires_completed_eac():
+    """Decision 24: still failing on 1st line but EAC not completed is an EAC
+    gap, not a committee case."""
+    done = cohort([mk(Session_1_Date="2026-03-05", Session_2_Date="2026-03-20",
+                      Session_3_Date="2026-04-05", Total_EAC_Sessions_All_Cycles=3)],
+                  fu_vl=8000, fu_samp="2026-06-01").df.loc[0]
+    not_done = cohort([mk(Session_1_Date="2026-03-05", Total_EAC_Sessions_All_Cycles=1)],
+                      fu_vl=8000, fu_samp="2026-06-01").df.loc[0]
+    assert bool(done["awaiting_switch"]) is True
+    assert bool(not_done["still_unsuppressed"]) is True and bool(not_done["awaiting_switch"]) is False

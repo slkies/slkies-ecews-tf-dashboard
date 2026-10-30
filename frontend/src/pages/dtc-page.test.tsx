@@ -42,7 +42,7 @@ function draw(onOpenWorklist = vi.fn()) {
   </FilterProvider></SessionProvider></ThemeProvider>)
   return { user, onOpenWorklist }
 }
-const ready = () => screen.findByText('1st line at index, still 1st')
+const ready = () => screen.findByText('completed EAC, 1st line at index, still 1st')
 const section = (t: RegExp) => screen.getByRole('heading', { name: t }).closest('section')!
 
 describe('DTC review page', () => {

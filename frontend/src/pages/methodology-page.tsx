@@ -117,6 +117,7 @@ export default function MethodologyPage() {
             ['EAC completed', 'Sessions 1, 2 and 3 recorded, and 30 days or more since session 3'],
             ['Post-EAC VL', 'Among episodes that completed EAC: sessions 1 to 3 recorded and a VL sample collected on or after session 3, whatever the 30-day rule. A different indicator from the follow-up VL, which is any VL sampled after the index result'],
             ['Left care before a repeat VL', 'An ART status of LTFU, IIT, stopped, died, transferred out or discontinued, with no follow-up VL'],
+            ['Awaiting DTC review', 'Completed EAC, on first line at the index VL and still on it, and the follow-up VL still 1,000 copies/mL or more'],
             ['Extended EAC', 'A session 4 in this cycle, dated on or before day 60 after session 3. Sessions from earlier cycles do not count'],
             ['Follow-up sample during EAC', 'A follow-up VL sample dated on or after session 1 and before session 3, whether or not counselling continued'],
             ['VL expected at the next visit', 'Completed EAC, no post-EAC sample, and the next scheduled visit (last ARV pickup plus days dispensed) falls within 60 days of completing EAC and is still ahead'],

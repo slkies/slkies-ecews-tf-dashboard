@@ -131,7 +131,7 @@ export default function CascadePage({ onOpenWorklist }: { onOpenWorklist?: (flag
              aria-busy={loading}>
           <Steps steps={steps} bySex={bySex} setBySex={setBySex} onOpenWorklist={onOpenWorklist} counts={counts} />
           <div className="grid gap-4 xl:grid-cols-2">
-            <WhereLost steps={steps} onOpenWorklist={onOpenWorklist} />
+            <WhereLost steps={steps} onOpenWorklist={onOpenWorklist} counts={counts} />
             <Outcome steps={steps} />
           </div>
         </div>
@@ -282,9 +282,10 @@ function Swatch({ color, label }: { color: string; label: string }) {
 
 /* ─────────────────────────────── where it is lost ──────────────────────────── */
 
-function WhereLost({ steps, onOpenWorklist }: {
+function WhereLost({ steps, onOpenWorklist, counts = {} }: {
   steps: CascadeStep[]
   onOpenWorklist?: (flag: string) => void
+  counts?: Record<string, number | null>
 }) {
   const g = (k: number) => steps.find((s) => s.step === k)?.n ?? 0
   const base = steps.some((s) => s.step === BASE) ? g(BASE) : g(1)
@@ -295,7 +296,9 @@ function WhereLost({ steps, onOpenWorklist }: {
     { label: 'Started, stopped before session 3', n: Math.max(0, g(2) - g(4)), flag: 'eac_incomplete' },
     { label: 'At session 3, not yet 30 days on', n: Math.max(0, g(4) - g(6)), pending: true },
     { label: 'Completed EAC, no post-EAC VL sample', n: Math.max(0, g(6) - g(61)), flag: 'awaiting_vl' },
-    { label: 'Still unsuppressed, awaiting DTC review', n: Math.max(0, g(93) - g(10)), flag: 'awaiting_switch' },
+    // the list's own count: it needs completed EAC (decision 24), so it is not 93 minus 10
+    { label: 'Still unsuppressed after completed EAC, awaiting DTC review',
+      n: counts.awaiting_switch ?? Math.max(0, g(93) - g(10)), flag: 'awaiting_switch' },
   ]
   const max = Math.max(1, ...gaps.map((x) => x.n))
 

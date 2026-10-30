@@ -162,9 +162,11 @@ function Headline({ data, trend, since }: { data: Ov; trend: Trend | null; since
                status={data.awaiting_switch
                  ? <StatusBadge tone="bad">Action needed</StatusBadge>
                  : <StatusBadge tone="good">None waiting</StatusBadge>}
-               definition="Episodes whose follow-up viral load is still at or above 1,000 copies/mL and are waiting for the switch committee's decision.">
-        <dl className="grid grid-cols-3 gap-3 border-t pt-3">
+               definition="Episodes that completed EAC, were on first line at the index VL and still are, and whose follow-up viral load is still at or above 1,000 copies/mL: waiting for the switch committee's decision.">
+        <dl className="grid grid-cols-2 gap-3 border-t pt-3 sm:grid-cols-4">
           <MiniStat term="Still ≥ 1,000" value={fmt(data.still_unsuppressed)} />
+          <MiniStat term="EAC not completed"
+                    value={fmt(Math.max(0, data.still_unsuppressed - data.awaiting_switch - data.prior_switch - data.switched))} />
           <MiniStat term="Prior switch" value={fmt(data.prior_switch)} />
           <MiniStat term="Switched" value={fmt(data.switched)}
                     sub={data.switch_pct != null ? `${pc(data.switch_pct)} of ${fmt(data.switch_eligible)} eligible` : undefined} />

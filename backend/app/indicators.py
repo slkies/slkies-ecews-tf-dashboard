@@ -829,8 +829,12 @@ def build_cohort(
     df["switch_eligible"] = (su & ~df["idx_on_2nd"]).fillna(False).astype(bool)
     df["switched"] = (su & ~df["idx_on_2nd"] & df["on_second_line"]).fillna(False).astype(bool)
     df["prior_switch"] = (su & df["idx_on_2nd"]).fillna(False).astype(bool)
-    df["awaiting_switch"] = (su & ~df["idx_on_2nd"]
-                             & ~df["on_second_line"]).fillna(False).astype(bool)
+    # Awaiting DTC review also requires COMPLETED EAC (decision 24): the list is
+    # "still unsuppressed after EAC", and a client who never finished EAC needs
+    # the EAC, not the committee. Those are on the EAC lists already, and are
+    # counted below as "EAC not completed" so the four groups add up.
+    df["awaiting_switch"] = (su & ~df["idx_on_2nd"] & ~df["on_second_line"]
+                             & df["eac_completed"]).fillna(False).astype(bool)
 
     samp = df["fu_samp"]
     res = df["fu_samp"]      # sample date is the clock for post-EAC timing
@@ -1965,6 +1969,8 @@ def dtc_review(df: pd.DataFrame) -> dict:
     switched = df["switched"].fillna(False).astype(bool)
     awaiting = df["awaiting_switch"].fillna(False).astype(bool)
     prior = df.get("prior_switch", pd.Series(False, index=df.index)).fillna(False).astype(bool)
+    # still >= 1,000, 1st line, not switched, EAC not completed (decision 24)
+    not_done = still & ~awaiting & ~prior & ~switched
     dtc = df["dtc_review"].fillna(False).astype(bool)
 
     d = df.assign(
@@ -1975,7 +1981,7 @@ def dtc_review(df: pd.DataFrame) -> dict:
                       "2nd/3rd line", "1st line"),
         _cd4=_col(df, "cd4_band"),
         _vl=_col(df, "vl_magnitude"),
-        _still=still, _await=awaiting, _switched=switched, _prior=prior)
+        _still=still, _await=awaiting, _switched=switched, _prior=prior, _notdone=not_done)
 
     def rate(a, b):
         return round(a / b * 100, 1) if b else None
@@ -2014,8 +2020,9 @@ def dtc_review(df: pd.DataFrame) -> dict:
             aw = int(g.loc[m, "_await"].sum())
             sw = int(g.loc[m, "_switched"].sum())
             pr = int(g.loc[m, "_prior"].sum())
+            nd = int(g.loc[m, "_notdone"].sum())
             out.append({"level": lv, "still": ns, "awaiting": aw, "switched": sw,
-                        "prior": pr, "pct_awaiting": rate(aw, ns)})
+                        "prior": pr, "not_completed": nd, "pct_awaiting": rate(aw, ns)})
         return out
 
     mu = pd.to_numeric(d["months_unsuppressed"], errors="coerce")
@@ -2041,6 +2048,7 @@ def dtc_review(df: pd.DataFrame) -> dict:
             "switched": int(switched.sum()),
             "awaiting": int(awaiting.sum()),
             "prior": int(prior.sum()),
+            "not_completed": int(not_done.sum()),
             "dtc_flag": int(dtc.sum()),
         },
         "repeat_assoc": {"n": int(rep.sum()), "pct": rate(int(rep.sum()), n),
@@ -2048,6 +2056,7 @@ def dtc_review(df: pd.DataFrame) -> dict:
         "switch_gap": {
             "n_still": int(still.sum()), "awaiting": int(awaiting.sum()),
             "switched": int(switched.sum()), "prior": int(prior.sum()),
+            "not_completed": int(not_done.sum()),
             "by_state": gap_by("state", states),
             "by_regimen": gap_by("_reg", ["1st line", "2nd/3rd line"]),
             "by_months": gap_by("_mub", ["<3 mo", "3-6 mo", "6-12 mo", "12+ mo"]),

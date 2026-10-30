@@ -118,7 +118,7 @@ describe('Deep dive page', () => {
     await screen.findByText('900 distinct clients')
     const flags = section(/Actionable flags/)
     const first = () => within(flags).getAllByRole('row')[1]!
-    expect(first()).toHaveTextContent('Still unsuppressed after EAC, awaiting DTC review')
+    expect(first()).toHaveTextContent('Still unsuppressed after completed EAC, awaiting DTC review')
     expect(first()).toHaveTextContent('High')
     await user.click(within(flags).getByRole('button', { name: 'Episodes' }))
     expect(first()).toHaveTextContent('Unsuppressed with no valid EAC record')   // 200, the largest

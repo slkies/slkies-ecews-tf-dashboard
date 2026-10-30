@@ -45,7 +45,7 @@ export const WORKLISTS: {
   /** What a facility team does next, in one line. */
   next: string
 }[] = [
-  { flag: 'awaiting_switch', label: 'Still unsuppressed after EAC, awaiting DTC review', group: 'Needs action', rank: 1, priority: 'High',
+  { flag: 'awaiting_switch', label: 'Still unsuppressed after completed EAC, awaiting DTC review', group: 'Needs action', rank: 1, priority: 'High',
     next: 'Present at the next DTC meeting for a decision on the next regimen line.' },
   { flag: 'dtc_review', label: 'More than 2 EAC cycles, still failing', group: 'Needs action', rank: 2, priority: 'High',
     next: 'Refer to the DTC: repeated EAC has not worked, so adherence alone is unlikely to explain it.' },

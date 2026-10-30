@@ -118,7 +118,7 @@ describe('Cascade page', () => {
     await user.click(within(row('Left care before a repeat VL')).getByRole('button'))
     expect(onOpenWorklist).toHaveBeenCalledWith('exited_no_vl')
     expect(within(row('At session 3, not yet 30 days on')).getByText('100')).toBeInTheDocument()
-    expect(within(row('Still unsuppressed, awaiting DTC review')).getByText('180')).toBeInTheDocument()
+    expect(within(row('Still unsuppressed after completed EAC, awaiting DTC review')).getByText('180')).toBeInTheDocument()
     // The 30-day wait is not a loss, so it has no worklist to open.
     expect(within(row('At session 3, not yet 30 days on')).queryByRole('button')).not.toBeInTheDocument()
     await user.click(within(row('Started, stopped before session 3')).getByRole('button'))

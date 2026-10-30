@@ -467,3 +467,10 @@ On the 24 Oct line list, 559 of the 1,032 episodes on repeat clients changed:
 cycle from an older list. Commenced EAC 4,166 to 3,912; post-EAC VL samples
 1,314 to 1,497.
 
+## 24. Awaiting DTC review requires completed EAC
+**30 Oct 2026** — *Still unsuppressed after EAC, awaiting DTC review* held every
+episode still at or above 1,000 on first line, whether or not EAC had happened,
+so an episode with no EAC could sit on the highest-priority list (Es). It now
+also requires completed EAC. Those without it are the EAC lists' work, and are
+shown wherever the still-unsuppressed group is split, as *EAC not completed*, so
+awaiting + prior switch + switched + EAC not completed = still at or above 1,000.
