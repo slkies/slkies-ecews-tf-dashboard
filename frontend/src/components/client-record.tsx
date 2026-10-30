@@ -216,7 +216,10 @@ export function RecordBody({ rec, wide = false }: { rec: ClientRecord; wide?: bo
         {rec.episodes.length === 1 ? '1 failure episode' : `${rec.episodes.length} failure episodes`}
       </h3>
       <div className={cn('flex flex-col gap-5', wide && 'grid items-start xl:grid-cols-2')}>
-        {rec.episodes.map((e, i) => <EpisodeCard key={e.episode} e={e} n={rec.episodes.length - i} wide={wide} />)}
+        {rec.episodes.map((e, i) => (
+          <EpisodeCard key={e.episode} e={e} n={rec.episodes.length - i} wide={wide}
+                       nextVisit={i === 0 ? rec.next_visit : null} />
+        ))}
       </div>
     </>
   )
@@ -251,7 +254,20 @@ function outcome(e: Episode): ReactNode {
   return DASH
 }
 
-function EpisodeCard({ e, n, wide = false }: { e: Episode; n: number; wide?: boolean }) {
+/** "in 12 days", "today", "9 days ago", from today. */
+function fromToday(iso: string): string {
+  const days = Math.round((new Date(`${iso.slice(0, 10)}T00:00:00`).getTime() - new Date(new Date().toDateString()).getTime()) / 86_400_000)
+  return days === 0 ? 'today' : days > 0 ? `in ${days} day${days === 1 ? '' : 's'}` : `${-days} day${days === -1 ? '' : 's'} ago`
+}
+
+function EpisodeCard({ e, n, wide = false, nextVisit = null }: {
+  e: Episode; n: number; wide?: boolean
+  /** The client's next scheduled visit; given to the current episode only. */
+  nextVisit?: string | null
+}) {
+  // Completed EAC, no post-EAC sample yet: the visit is when it can be drawn,
+  // so the health worker sees the date without opening the pharmacy record.
+  const vlDue = !!e.eac_completed && !e.post_eac_vl
   const lists = WORKLISTS.filter((w) => e.worklists.includes(w.flag))
   return (
     <section aria-label={`Episode ${n}`} className={cn('flex flex-col gap-3 rounded-xl border p-4', wide && 'bg-card')}>
@@ -283,6 +299,16 @@ function EpisodeCard({ e, n, wide = false }: { e: Episode; n: number; wide?: boo
           </span>
         )}
       </div>
+      {vlDue && (
+        <div className="flex flex-col gap-0.5 rounded-lg border border-warn/40 bg-warn-tint px-3 py-2 text-sm">
+          <span className="font-medium text-warn">Post-EAC VL sample due</span>
+          <span>
+            {nextVisit
+              ? <>Next scheduled visit: <span className="font-medium tabular-nums">{fmtDate(nextVisit)}</span> ({fromToday(nextVisit)})</>
+              : 'No next scheduled visit on the treatment line list.'}
+          </span>
+        </div>
+      )}
       <dl className="grid grid-cols-2 gap-x-6 gap-y-3 sm:grid-cols-3">
         <Fact label="Follow-up sample collected">{fmtDate(e.fu_samp)}</Fact>
         <Fact label="Follow-up result received">{fmtDate(e.fu_date)}</Fact>

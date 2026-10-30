@@ -843,7 +843,8 @@ def client_search(u: U, request: Request,
         latest = latest.assign(episodes=latest["sn"].map(df["sn"].value_counts()))
         n = len(latest)
         rows = _json_safe(latest[["sn", "facility", "state", "sex", "age", "art_status",
-                                  "idx_vl", "recv_date", "idx_date", "episodes"]]
+                                  "idx_vl", "recv_date", "idx_date", "episodes",
+                                  *(["next_visit"] if "next_visit" in latest else [])]]
                           .head(_SEARCH_LIMIT))
     crit = ", ".join(f"{k}={v}" for k, v in
                      [("sn~", q), ("facility", facility), ("sex", sex),

@@ -106,6 +106,19 @@ describe('Client record', () => {
     expect(earlier).toHaveTextContent('more than 60 days after session 3: not counted as extended EAC')
   })
 
+  it('shows the next scheduled visit when a post-EAC sample is due', async () => {
+    const due = { ...RECORD, next_visit: '2026-11-20',
+                  episodes: [{ ...RECORD.episodes[0]!, eac_completed: true, post_eac_vl: false }, RECORD.episodes[1]!] }
+    mock(MATCHES, due)
+    draw(<ClientKey sn={RECORD.sn} />)
+    await userEvent.click(screen.getByRole('button', { name: /Open the record/ }))
+    const latest = await screen.findByRole('region', { name: 'Episode 2' })
+    expect(latest).toHaveTextContent('Post-EAC VL sample due')
+    expect(latest).toHaveTextContent('Next scheduled visit: 20 Nov 2026')
+    // the earlier episode has its post-EAC result, so no notice there
+    expect(screen.getByRole('region', { name: 'Episode 1' })).not.toHaveTextContent('Post-EAC VL sample due')
+  })
+
   it('says a client outside the area is not found, without saying they exist elsewhere', async () => {
     mock(MATCHES, null)
     draw(<ClientKey sn="0.999999999999" />)

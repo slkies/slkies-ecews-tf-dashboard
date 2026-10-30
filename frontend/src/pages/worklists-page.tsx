@@ -292,8 +292,8 @@ export function ClientTable({ rows, exportPath, flag, caption, loading = false }
                    searchPlaceholder="Search facility or S/N" columnLabels={LABELS}
                    // Off by default so the table fits a laptop; the list
                    // is mostly Active anyway, and exports are Active only.
-                   // Next visit only matters on the list it defines.
-                   hiddenColumns={flag === 'vl_at_next_visit' ? ['art_status'] : ['art_status', 'next_visit']}
+                   // Next visit matters on the lists waiting for a post-EAC sample.
+                   hiddenColumns={flag === 'vl_at_next_visit' || flag === 'awaiting_vl' ? ['art_status'] : ['art_status', 'next_visit']}
                    caption={caption} emptyText="No facility or S/N matches that search."
                    actions={(selected) => canExport && (
                      <>

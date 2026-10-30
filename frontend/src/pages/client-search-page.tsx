@@ -27,6 +27,7 @@ export interface ClientMatch {
   sn: string; facility: string | null; state: string | null; sex: string | null; age: number | null
   art_status: string | null; idx_vl: number | null; recv_date: string | null; idx_date: string | null
   episodes: number
+  next_visit?: string | null
 }
 interface SearchResult { n: number; shown: number; limit: number; clients: ClientMatch[] }
 
@@ -209,6 +210,7 @@ function Results({ res }: { res: SearchResult }) {
                   <SortHead label="Latest index VL" k="idx_vl" sort={sort} onSort={toggle} align="right" />
                   <SortHead label="Result received" k="received" sort={sort} onSort={toggle} />
                   <SortHead label="Episodes" k="episodes" sort={sort} onSort={toggle} align="right" />
+                  <SortHead label="Next visit" k="next_visit" sort={sort} onSort={toggle} />
                   <SortHead label="ART status" k="art_status" sort={sort} onSort={toggle} text />
                 </TableRow>
               </TableHeader>
@@ -222,6 +224,7 @@ function Results({ res }: { res: SearchResult }) {
                     <TableCell className="text-right tabular-nums">{fmt(c.idx_vl)}</TableCell>
                     <TableCell className="tabular-nums">{fmtDate(c.received)}</TableCell>
                     <TableCell className="text-right tabular-nums">{c.episodes}</TableCell>
+                    <TableCell className="tabular-nums">{fmtDate(c.next_visit)}</TableCell>
                     <TableCell>{c.art_status ?? DASH}</TableCell>
                   </TableRow>
                 ))}
