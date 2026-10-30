@@ -136,6 +136,10 @@ in the spec and in `docs/DECISIONS_AND_INCIDENTS.md`.
 19. **Clients who left care before a repeat VL are not a gap** (decision 20): own
     cascade step and worklist, out of every gap measure.
 20. **Worklists are ranked by clinical urgency** (decision 21).
+21. **Extended EAC is this cycle's session 4 within 60 days of session 3; a sample
+    on or after session 1 and before session 3 is "during EAC"; a client whose next
+    scheduled visit falls within 60 days of completing EAC is waiting, not overdue**
+    (decision 22). Needs a fresh line list upload: these are computed at ingest.
 
 **Recurring bugs to guard:** chain `.fillna(False).astype(bool)` after a merge; never
 hold a `Series` across `sort_values().reset_index()` in `build_cohort`; cast a

@@ -48,6 +48,7 @@ beforeEach(() => {
     if (url.startsWith('/api/me')) return json({ username: 'u', email: 'u@x', name: 'U', role: 'viewer', scope_state: null, scope_facility: null })
     if (url.startsWith('/api/filters')) return json(OPTIONS)
     if (url.startsWith('/api/cascade')) return json(STEPS)
+    if (url.startsWith('/api/worklists')) return json([{ flag: 'trunc_mid', n: 41 }, { flag: 'trunc_pre', n: 0 }, { flag: 'awaiting_vl', n: 12 }])
     return json({})
   }))
 })
@@ -130,5 +131,14 @@ describe('Cascade page', () => {
     const n = within(out).getAllByRole('listitem').map((li) => Number(li.querySelector('.font-medium')!.textContent!.replace(/,/g, '')))
     expect(n).toEqual([300, 150, 200, 250, 100])         // ...no result yet, still in care; left care
     expect(n.reduce((a, b) => a + b, 0)).toBe(1000)
+  })
+
+  it('flags follow-up samples taken during EAC under the sample step, and opens their worklist', async () => {
+    const { user, onOpenWorklist } = draw()
+    const flag = await screen.findByText(/41 sampled during EAC, before session 3/)
+    // only lists with someone on them are shown
+    expect(screen.queryByText(/sampled before EAC began/)).toBeNull()
+    await user.click(within(flag.closest('div')!).getByRole('button', { name: /Open worklist/ }))
+    expect(onOpenWorklist).toHaveBeenCalledWith('trunc_mid')
   })
 })

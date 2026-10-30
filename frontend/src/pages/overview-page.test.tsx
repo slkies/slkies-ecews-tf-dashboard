@@ -26,7 +26,7 @@ const OPTIONS = {
 const BASE: Ov = {
   n: 4548, clients: 4101, repeats: 447, repeat_clients: 389, as_of: '2026-09-05', warnings: null,
   eac1: 3912, eac1_pct: 86.0, never_eac: 636, completed: 2104, completed_pct: 53.8, post_eac_vl: 1290,
-  retested: 1877, retest_pct: 41.3, awaiting_retest: 2671, resuppressed: 1402, resupp_pct: 74.7,
+  retested: 1877, retest_pct: 41.3, awaiting_retest: 2671, fu_sampled: 2101, fu_sample_pct: 46.2, resuppressed: 1402, resupp_pct: 74.7,
   still_unsuppressed: 475, switch_eligible: 475, switched: 310, prior_switch: 42, switch_pct: 65.3,
   awaiting_switch: 123, repeat_failure: 88,
   progress: [
@@ -110,7 +110,7 @@ describe('Overview page', () => {
 
   it('carries status as a word, not colour alone', () => {
     draw(BASE)
-    expect(within(tile('Follow-up VL done')).getByText('Below 50%')).toBeInTheDocument()
+    expect(within(tile('Follow-up VL sample')).getByText('Below 50%')).toBeInTheDocument()
     expect(within(tile('Commenced EAC')).getByText('On track')).toBeInTheDocument()
     expect(within(tile('Awaiting DTC review')).getByText('Action needed')).toBeInTheDocument()
   })
@@ -123,10 +123,18 @@ describe('Overview page', () => {
 
   it('shows movement against the previous line list, and says so for screen readers', () => {
     draw(BASE, { trend: TREND })
-    const t = tile('Follow-up VL done')
-    expect(within(t).getByText('2.4 pts')).toBeInTheDocument()
-    expect(within(t).getByText('down 2.4 pts since the previous line list')).toBeInTheDocument()
+    const t = tile('Re-suppressed')
+    expect(within(t).getByText('0.3 pts')).toBeInTheDocument()
+    expect(within(t).getByText('down 0.3 pts since the previous line list')).toBeInTheDocument()
     expect(screen.getByText(/trends compare with the list of 22 Aug 2026/)).toBeInTheDocument()
+  })
+
+  it('shows follow-up samples first, then how many results are back', () => {
+    draw(BASE)
+    const t = tile('Follow-up VL sample')
+    expect(t).toHaveTextContent('46.2%')
+    expect(t).toHaveTextContent('2,101 of')
+    expect(t).toHaveTextContent('1,877 results back (41.3%)')
   })
 
   it('omits a trend it cannot compute rather than showing zero', () => {

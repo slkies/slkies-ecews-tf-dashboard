@@ -159,6 +159,16 @@ ALTER TABLE cohort ADD COLUMN IF NOT EXISTS first_vl        NUMERIC;
 ALTER TABLE cohort ADD COLUMN IF NOT EXISTS first_vl_date   DATE;
 ALTER TABLE cohort ADD COLUMN IF NOT EXISTS first_high_vl   NUMERIC;
 ALTER TABLE cohort ADD COLUMN IF NOT EXISTS first_high_date DATE;
+-- 30 Oct 2026: session dates for the client record, and the pickup that says
+-- when a client's next visit is (the waiting-for-visit worklist).
+ALTER TABLE cohort ADD COLUMN IF NOT EXISTS s2_date          DATE;
+ALTER TABLE cohort ADD COLUMN IF NOT EXISTS s3_date          DATE;
+ALTER TABLE cohort ADD COLUMN IF NOT EXISTS s4_date          DATE;
+ALTER TABLE cohort ADD COLUMN IF NOT EXISTS last_pickup      DATE;
+ALTER TABLE cohort ADD COLUMN IF NOT EXISTS days_refill      NUMERIC;
+ALTER TABLE cohort ADD COLUMN IF NOT EXISTS next_visit       DATE;
+ALTER TABLE cohort ADD COLUMN IF NOT EXISTS vl_at_next_visit BOOLEAN;
+
 CREATE INDEX IF NOT EXISTS cohort_lga_res ON cohort(upload_id, lga_res_norm);
 
 CREATE INDEX IF NOT EXISTS cohort_upload   ON cohort(upload_id);

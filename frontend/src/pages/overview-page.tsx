@@ -142,11 +142,15 @@ function Headline({ data, trend, since }: { data: Ov; trend: Trend | null; since
                note={`${fmt(data.post_eac_vl)} of ${fmt(data.completed)} who completed EAC`}
                status={badge(rateTone(postEacPct, 60, 'bad'))}
                definition="Sessions 1-3 plus a viral load sample on or after session 3, over episodes that completed EAC. A different indicator from the follow-up VL." />
-      <KpiTile icon={Microscope} label="Follow-up VL done" value={pc(data.retest_pct)}
-               trend={tv?.retest} since={since}
-               note={`${fmt(data.retested)} of ${fmt(data.in_care ?? data.n)} · ${fmt(data.awaiting_retest)} with no later VL`}
-               status={badge(rateTone(data.retest_pct, 50, 'bad'))}
-               definition="Episodes with any viral load sampled after the index result was received, over episodes still in care or retested. Taken from the clinical line lists, never the EAC sheet." />
+      {/* Samples, then results, as the cascade reads them (steps 7 and 8), so
+          this compares like with like with the post-EAC sample tile beside it. */}
+      <KpiTile icon={Microscope} label="Follow-up VL sample"
+               value={pc(data.fu_sample_pct ?? data.retest_pct)}
+               note={data.fu_sampled != null
+                 ? `${fmt(data.fu_sampled)} of ${fmt(data.in_care ?? data.n)} sampled · ${fmt(data.retested)} results back (${pc(data.retest_pct)})`
+                 : `${fmt(data.retested)} of ${fmt(data.in_care ?? data.n)} · ${fmt(data.awaiting_retest)} with no later VL`}
+               status={badge(rateTone(data.fu_sample_pct ?? data.retest_pct, 50, 'bad'))}
+               definition="Episodes with a viral load sampled after the index result was received, then how many of those results have come back. Over episodes still in care or retested. Taken from the clinical line lists, never the EAC sheet." />
       <KpiTile icon={Activity} label="Re-suppressed" value={pc(data.resupp_pct)}
                trend={tv?.resupp} since={since}
                note={`${fmt(data.resuppressed)} of ${fmt(data.retested)} with a follow-up VL`}

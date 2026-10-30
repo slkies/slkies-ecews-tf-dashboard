@@ -52,6 +52,8 @@ VL_UNDETECTABLE = 50    # < this = undetectable
 LLV_HIGH_RISK = 200     # 200-999 -> recommend switch (spec §1.4)
 EAC_MIN_SESSIONS = 3    # spec §1.3
 EAC_COMPLETE_DAYS = 30  # completed = sessions 1-3 plus >=30 days since session 3
+EAC_EXTENDED_MAX_DAYS = 60  # session 4 within this many days of session 3 = extended (Es, 30 Oct 2026)
+VISIT_WINDOW_DAYS = 60      # a scheduled visit this soon after EAC completion: VL likely drawn then
 
 # Socio-demographic level collapsing. Source values are lower-cased/stripped
 # before lookup; anything unmapped or blank falls through to "Not recorded".
@@ -425,6 +427,10 @@ def build_cohort(
              "outcomesDate": "outcome_date",
              "pharmacyLastPickupdate": "last_pickup",
              "daysOfArvRefill": "days_refill",
+             # The pharmacy's own next appointment: the fallback when pickup
+             # plus refill days cannot be computed (it agrees within a week
+             # 92% of the time on the 24 Oct list).
+             "EstimatedNextAppointmentPharmacy": "next_appt_pharm",
              # residence (free-text in the EMR - normalised only at map time)
              "lgaOfResidence": "lga_res", "stateOfResidence": "state_res"}
     # Resolve the mapping case-insensitively. The export renames columns between
@@ -582,7 +588,14 @@ def build_cohort(
     df["eac1"] = v
     df["eac2"] = v & df["Session_2_Date"].notna()
     df["eac3"] = v & df["Session_3_Date"].notna()
-    df["eac_extended"] = v & (df["sessions"] >= 4)
+    # Extended EAC counts a session 4 only in THIS cycle: dated within 60 days
+    # of the index cycle's session 3 (Es, 30 Oct 2026). It used to be
+    # Total_EAC_Sessions_All_Cycles >= 4, which counts earlier cycles' sessions
+    # - 4,582 rows on the 24 Oct EAC list, of which only 1,751 had a session 4
+    # date at all. Sessions run monthly (median gap 31 days), so a session at
+    # day 28 is the normal rhythm and counts; one after day 60 does not.
+    gap4 = (df["Session_4_Extended_Date"] - df["Session_3_Date"]).dt.days
+    df["eac_extended"] = (v & df["eac3"] & gap4.between(0, EAC_EXTENDED_MAX_DAYS)).fillna(False).astype(bool)
     # eac_completed is defined further down: it now requires a follow-up VL SAMPLE
     # collected on/after session 3, so it must wait until fu_samp is known.
 
@@ -709,6 +722,28 @@ def build_cohort(
         eac123 & ((as_of - df["Session_3_Date"]).dt.days >= EAC_COMPLETE_DAYS)
     ).fillna(False).astype(bool)
 
+    # -- PICKUP AND THE NEXT SCHEDULED VISIT (Es, 30 Oct 2026) -------------
+    # Clients whose next scheduled visit falls within two months of finishing
+    # EAC often wait for that visit to have the post-EAC VL drawn, rather than
+    # make a separate trip. They are not overdue in the same sense as a client
+    # with no visit in sight, so they get their own worklist. Next visit = last
+    # pickup + days of ARVs dispensed, else the pharmacy's own estimate. The
+    # visit must still be ahead: one that has passed with no sample is overdue.
+    lp = pd.to_datetime(_col(df, "last_pickup"), errors="coerce")
+    refill = pd.to_numeric(_col(df, "days_refill"), errors="coerce")
+    calc = lp + pd.to_timedelta(refill, unit="D")
+    df["last_pickup"] = lp
+    df["days_refill"] = refill
+    df["next_visit"] = calc.where(calc.notna(),
+                                  pd.to_datetime(_col(df, "next_appt_pharm"), errors="coerce"))
+    done_on = df["Session_3_Date"] + pd.Timedelta(days=EAC_COMPLETE_DAYS)
+    nv = df["next_visit"]
+    df["vl_at_next_visit"] = (
+        df["eac_completed"] & ~df["post_eac_vl"] & nv.notna()
+        & (nv >= done_on) & (nv <= done_on + pd.Timedelta(days=VISIT_WINDOW_DAYS))
+        & (nv >= as_of)
+    ).fillna(False).astype(bool)
+
     df["resuppressed"] = df["post_result"] & (df["fu_vl"] < VL_FAIL)
     df["undetectable"] = df["post_result"] & (df["fu_vl"] < VL_UNDETECTABLE)
     df["llv"] = df["post_result"] & df["fu_vl"].between(VL_UNDETECTABLE, VL_FAIL - 1)
@@ -763,12 +798,13 @@ def build_cohort(
     df["eac_trunc_pre"] = (
         samp.notna() & s1.notna() & (samp < s1)
     ).fillna(False).astype(bool)
+    # MID: any follow-up sample on or after session 1 and before session 3
+    # (Es, 30 Oct 2026), whether or not counselling carried on afterwards. The
+    # earlier rule caught it only when a later session was then never held, so
+    # a client who kept attending after a mid-cycle retest was invisible.
+    s3 = df["Session_3_Date"]
     df["eac_trunc_mid"] = (
-        samp.notna()
-        & (
-            (samp > s1) & df["Session_2_Date"].isna()
-            | (samp > df["Session_2_Date"]) & df["Session_3_Date"].isna()
-        )
+        samp.notna() & s1.notna() & (samp >= s1) & (s3.isna() | (samp < s3))
     ).fillna(False).astype(bool)
     df["eac_truncated"] = (df["eac_trunc_pre"] | df["eac_trunc_mid"])
 

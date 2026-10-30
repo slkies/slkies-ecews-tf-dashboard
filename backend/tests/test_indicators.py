@@ -55,7 +55,7 @@ def _idx(sn="0.123456789012345", vl=5000, d="2026-03-01"):
 
 
 def cohort(eac_rows, status="Active", fu_vl=None, fu_samp=None,
-           line="Adult 1st line ARV regimen"):
+           line="Adult 1st line ARV regimen", treatment_extra=None):
     """
     `event` mode is retired: the cohort now always comes from the quarterly
     Total Unsuppressed list. So synthesise the index row each EAC row implies,
@@ -63,6 +63,8 @@ def cohort(eac_rows, status="Active", fu_vl=None, fu_samp=None,
     """
     e = pd.DataFrame(eac_rows)
     t = treat(status=status, fu_vl=fu_vl, fu_samp=fu_samp, line=line)
+    if treatment_extra:
+        t = t.assign(**treatment_extra)
     tu = pd.DataFrame([{
         "S/N": r["S/N"],
         "currentViralLoad": r["EAC_Triggering_High_VL_Value"],
@@ -658,3 +660,63 @@ def test_the_risk_list_leaves_out_clients_who_left_care_before_a_retest():
     assert r["n_scored"] == n_pend // 2 and r["n_left_care"] == n_pend // 2
     kept = set(df["sn"][n_train:n_train + n_pend // 2])
     assert {x["sn"] for x in r["lowest_chance"]} == kept
+
+
+# ── decision 22 (30 Oct 2026): extended EAC, samples during EAC, the next visit ──
+_COURSE = dict(Session_1_Date="2026-03-05", Session_2_Date="2026-03-20",
+               Session_3_Date="2026-04-05")
+
+
+@pytest.mark.parametrize("s4, extended", [
+    ("2026-05-05", True),     # 30 days after session 3
+    ("2026-04-28", True),     # 23 days: the monthly rhythm, still this cycle
+    ("2026-06-04", True),     # day 60, the last day that counts
+    ("2026-07-01", False),    # 87 days: not this cycle's extended EAC
+    (None, False),            # no session 4 at all
+])
+def test_extended_eac_counts_only_a_session_4_within_60_days_of_session_3(s4, extended):
+    c = cohort([mk(**_COURSE, Session_4_Extended_Date=s4, Total_EAC_Sessions_All_Cycles=6)])
+    assert bool(c.df.loc[0, "eac_extended"]) is extended
+
+
+def test_sessions_from_earlier_cycles_no_longer_make_eac_extended():
+    """The old rule: Total_EAC_Sessions_All_Cycles >= 4, counting every cycle."""
+    c = cohort([mk(**_COURSE, Total_EAC_Sessions_All_Cycles=9)])
+    assert bool(c.df.loc[0, "eac_extended"]) is False
+
+
+@pytest.mark.parametrize("samp, pre, mid", [
+    ("2026-03-03", True, False),    # before session 1: EAC had not begun
+    ("2026-03-25", False, True),    # between sessions 1 and 3, sessions carried on
+    ("2026-05-10", False, False),   # after session 3: a proper post-EAC sample
+])
+def test_a_follow_up_sample_during_eac_is_flagged_even_if_sessions_carried_on(samp, pre, mid):
+    c = cohort([mk(**_COURSE, Total_EAC_Sessions_All_Cycles=3)], fu_vl=1500, fu_samp=samp)
+    assert bool(c.df.loc[0, "eac_trunc_pre"]) is pre
+    assert bool(c.df.loc[0, "eac_trunc_mid"]) is mid
+
+
+# Session 3 on 20 May: EAC complete from 19 Jun; AS_OF is 11 Jul; no post-EAC sample.
+_DONE = dict(Session_1_Date="2026-04-01", Session_2_Date="2026-04-25",
+             Session_3_Date="2026-05-20", Total_EAC_Sessions_All_Cycles=3)
+
+
+@pytest.mark.parametrize("pickup, days, waiting", [
+    ("2026-06-15", 60, True),     # next visit 14 Aug: within 2 months of completion, still ahead
+    ("2026-06-01", 30, False),    # next visit 1 Jul: already passed, so overdue, not waiting
+    ("2026-06-15", 180, False),   # next visit Dec: too far off to be the reason for waiting
+])
+def test_waiting_for_the_next_visit_is_told_apart_from_overdue(pickup, days, waiting):
+    c = cohort([mk(**_DONE)], treatment_extra={"pharmacyLastPickupdate": pickup, "daysOfArvRefill": days})
+    row = c.df.loc[0]
+    assert bool(row["eac_completed"]) and not bool(row["post_eac_vl"])
+    assert bool(row["vl_at_next_visit"]) is waiting
+    assert row["next_visit"] == pd.Timestamp(pickup) + pd.Timedelta(days=days)
+
+
+def test_the_no_post_eac_vl_list_leaves_out_clients_waiting_for_their_visit():
+    from app import main as M
+    waiting = cohort([mk(**_DONE)], treatment_extra={"pharmacyLastPickupdate": "2026-06-15", "daysOfArvRefill": 60}).df
+    overdue = cohort([mk(**_DONE)], treatment_extra={"pharmacyLastPickupdate": "2026-06-01", "daysOfArvRefill": 30}).df
+    assert bool(M._flag_mask(waiting, "vl_at_next_visit").iloc[0]) and not bool(M._flag_mask(waiting, "awaiting_vl").iloc[0])
+    assert bool(M._flag_mask(overdue, "awaiting_vl").iloc[0]) and not bool(M._flag_mask(overdue, "vl_at_next_visit").iloc[0])

@@ -412,8 +412,37 @@ Deep dive's actionable flags, most urgent first:
 | 4 | Medium | Completed EAC 30+ days ago, no post-EAC VL | the decision is blocked on a sample |
 | 5 | Medium | Unsuppressed with no valid EAC record | no intervention yet |
 | 6 | Medium | Started EAC but not completed | intervention stalled |
-| 7 | Low | Unsuppressed for more than 6 months | a wide net overlapping the above |
-| 8 | Low | Left care before a repeat VL | tracing, not EAC |
+| 7 | Low | Completed EAC, VL expected at the next scheduled visit | added by decision 22 |
+| 8 | Low | Unsuppressed for more than 6 months | a wide net overlapping the above |
+| 9 | Low | Left care before a repeat VL | tracing, not EAC |
 
 Context and data-check lists are not ranked. The order lives in one place
 (`WORKLISTS` in `worklists-page.tsx`) and is the programme's to change.
+
+## 22. Extended EAC, samples during EAC, and clients waiting for their visit
+**30 Oct 2026** — Three rules, from a facility review where nearly every client
+showed extended EAC (Es).
+
+**Extended EAC counts this cycle only.** A session 4 counts when it is dated on or
+before day 60 after the index cycle's session 3. The old rule,
+`Total_EAC_Sessions_All_Cycles >= 4`, counted every earlier cycle's sessions: on
+the 24 Oct line list it called 1,948 episodes extended, against 379 now. Sessions
+run monthly (median gap 31 days), so a session 4 at day 28 counts; one after day
+60 is shown on the client record but not counted.
+
+**A follow-up sample during EAC** is any sample dated on or after session 1 and
+before session 3, whether or not counselling carried on afterwards (610 to 648).
+The old rule caught it only when a later session was never held. The cascade
+shows these, and samples taken before EAC began (506), under the follow-up sample
+step, each opening its worklist, for root-cause review.
+
+**Waiting for the next visit is not overdue.** A client who completed EAC, has no
+post-EAC sample, and whose next scheduled visit (last pickup plus days of ARVs
+dispensed, else the pharmacy's estimate) falls within 60 days of completing EAC
+and is still ahead, is likely to have the VL drawn at that visit. They move from
+*Completed EAC 30+ days ago, no post-EAC VL sample* to their own Low-priority list,
+*Completed EAC, VL expected at the next scheduled visit* (131 of 921 on the 24 Oct
+list). Once the visit date passes with no sample they return to the overdue list.
+
+Also: the Overview's follow-up VL tile shows samples first, then results (as the
+cascade does), so it compares like with like with the post-EAC sample tile.
