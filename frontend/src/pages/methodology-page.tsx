@@ -21,7 +21,7 @@ const KINDS: { kind: string; label: string; role: string; icon: LucideIcon }[] =
 const kindLabel = (k: string) => KINDS.find((x) => x.kind === k)?.label ?? k
 
 /**
- * Data Analysis Plan v3.0: how the figures are built, then the line list they
+ * Data Analysis Plan v3.1: how the figures are built, then the line list they
  * are built from. Moved here from the foot of the Overview (Es, 23 Oct 2026),
  * with the sources kept apart from the definitions.
  */
@@ -47,7 +47,7 @@ export default function MethodologyPage() {
       </div>
 
       <DocGrid>
-        <Doc eyebrow="Data Analysis Plan v3.0" title="The unit of analysis is a failure episode">
+        <Doc eyebrow="Data Analysis Plan v3.1" title="The unit of analysis is a failure episode">
           <p>
             A client may fail, complete EAC, re-suppress, and fail again. That is two index events and
             two trips through the cascade: one client, two episodes. The key is the client S/N, the
