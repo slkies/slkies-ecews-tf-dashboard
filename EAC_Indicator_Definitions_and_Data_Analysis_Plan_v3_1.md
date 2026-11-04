@@ -2,9 +2,9 @@
 
 **Purpose**: Complete, self-contained specification for the Enhanced Adherence Counseling (EAC) treatment-failure monitoring dashboard and analysis pipeline.
 
-**Version**: 3.0
+**Version**: 3.1
 **Date**: 14 July 2026
-**Supersedes**: v2.1 (13 July 2026)
+**Supersedes**: v3.0 (14 July 2026)
 **Source**: 2024 Nigerian National Guidelines for HIV Prevention, Treatment and Care + operational cascade logic + findings from the v1.0 implementation against the 11 July 2026 export.
 **Scope**: FY-aligned (Oct 1 – Sep 30), unsuppressed clients (VL ≥ 1,000 copies/ml only), multi-source line lists.
 **Unique Identifier**: `S/N` — a de-identified pseudonym. No PatientID or hospital number is used or stored.
