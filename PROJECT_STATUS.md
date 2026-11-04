@@ -1,6 +1,6 @@
 # ECEWS TF Monitor — Project Status & Handoff
 
-**Last updated:** 30 Oct 2026
+**Last updated:** 2 Nov 2026
 **Owner:** Es (Data Analytics Lead, ECEWS / SPEED Program — PEPFAR/CDC, Nigeria)
 **Purpose:** Online, multi-user web app for HIV ART **treatment-failure (TF)** and
 **EAC** monitoring across Delta, Osun, Ekiti. An admin loads the de-identified line
@@ -61,8 +61,8 @@ docker compose up -d --build        # http://localhost:8080 (compose maps 8080 -
     -e TEST_DATABASE_URL="postgresql://<user>:<password>@db:5432/ecews_test" \
     -v "$(pwd)/backend:/work" -w /work ecews_tf_monitor-api pytest -q
   ```
-  **186 passing** (23 Oct 2026).
-- **Frontend tests:** `cd frontend && npx vitest run` — **132 passing**. Type check:
+  **215 passing** (30 Oct 2026).
+- **Frontend tests:** `cd frontend && npx vitest run` — **148 passing**. Type check:
   `npx tsc --noEmit`.
 - **Harness pages** (`/harness-*.html` on the Vite dev server) render each page
   with synthetic data and no backend, for checking in a real browser without
@@ -83,7 +83,7 @@ windows.
 | DTC review | Switch gap, VL response (log drop), laboratory queue, per-client VL trajectories, repeat-unsuppression odds ratios, DTC worklists |
 | Time metrics | Four medians, six timed steps as box plots against targets, Kaplan-Meier to re-suppression, time on ART to first unsuppressed VL by ART-start era |
 | Line list changes | Any two snapshots compared: days apart, episodes carried / new / gone, cascade movement with backwards steps marked |
-| Worklists | Twelve lists ranked by clinical urgency, each with its next step; sortable table, server-side audited export (admin/analyst) |
+| Worklists | Nine action lists ranked High / Medium / Low by clinical urgency, each with its next step, plus context and data-check lists; sortable table, server-side audited export (admin/analyst) |
 | Client search | Find one client by S/N (or part of it), or by facility plus one detail; opens the client record |
 | Treatment plans | Plans A–H with the reason each applies, split by sex; a plan opens its clients |
 | Advanced analytics | Factors for re-suppression (forest plot, univariate and adjusted table), baseline CD4, the risk model with calibration and the lowest-chance list, mortality |
@@ -149,35 +149,45 @@ in the spec and in `docs/DECISIONS_AND_INCIDENTS.md`.
     (decision 22). Needs a fresh line list upload: these are computed at ingest.
 22. **Each failure episode gets its own EAC cycle**: session 1 after its index and before
     the client's next index (decision 23).
+23. **Awaiting DTC review requires completed EAC**; still unsuppressed without completed
+    EAC is shown as "EAC not completed" (decision 24).
+24. **EAC cycles are counted from the client's own episodes**, not the export's
+    `EAC_Cycle_Number`; more than 2 cycles and still failing goes to DTC review
+    (decision 25).
 
 **Recurring bugs to guard:** chain `.fillna(False).astype(bool)` after a merge; never
 hold a `Series` across `sort_values().reset_index()` in `build_cohort`; cast a
 categorical to object before filling it (pandas 2.2).
 
-## 5. Current figures (line list of 16 Oct 2026, all episodes)
+## 5. Current figures (line list of 24 Oct 2026, version 2.2 rules, all episodes)
 
 | Metric | Value |
 |---|---|
-| Episodes / clients | **4,824 / 4,275** — 469 clients unsuppressed more than once (549 repeat episodes) |
-| Quarters | FY25Q4 1,283 · FY26Q1 850 · FY26Q2 885 · FY26Q3 975 · FY26Q4 787 · FY27Q1 44 |
-| Left care before a repeat VL | 322 (6.7%) — out of every gap measure; 4,502 in care or retested |
-| EAC commenced | **85.1%** (3,830) — 672 never started |
-| EAC completed (S1–3 + 30 days) | 52.4% of those who commenced (2,008) |
-| Post-EAC VL sample | 1,216 |
-| Follow-up VL sample / result | 2,626 (58.3%) / 2,390 (53.1%) of those in care or retested |
-| Re-suppressed | **77.6%** (1,855) — 1,540 undetectable, 315 low-level viraemia |
-| Still ≥ 1,000 | 535 · **awaiting DTC review 478** · switched 26 (4.9%) |
-| Medians | to EAC 25 d · EAC lead 167 d · to re-suppression 168 d · months unsuppressed 8.8 |
-| Risk model | AUC 0.862 on 2,390 retested episodes |
+| Episodes / clients | **4,860 / 4,301** — 473 clients unsuppressed more than once (559 repeat episodes) |
+| Quarters | FY25Q4 1,286 · FY26Q1 850 · FY26Q2 885 · FY26Q3 975 · FY26Q4 787 · FY27Q1 77 |
+| Left care before a repeat VL | 342 (7.0%) — out of every gap measure; 4,518 in care or retested |
+| EAC commenced | **80.5%** (3,639) — 879 never started |
+| EAC completed (S1–3 + 30 days) | 56.7% of those who commenced (2,065) |
+| Post-EAC VL sample | 1,493 |
+| Follow-up VL sample / result | 2,758 (61.0%) / 2,443 (54.1%) of those in care or retested |
+| Re-suppressed | **77.5%** (1,894) — 1,566 undetectable, 328 low-level viraemia |
+| Still ≥ 1,000 | 549 · **awaiting DTC review 176** · switched 26 (4.7%) · more than 2 cycles, still failing 6 |
+| Medians | to EAC 22 d · EAC lead 166 d · to re-suppression 168 d · months unsuppressed 9.0 |
+| Risk model | AUC 0.811 on retested episodes |
 
-Previous snapshot: 14 Aug 2026 (4,228 episodes). Line list changes compares the two.
+The 2.2 rules lowered some figures that were inflated before (EAC commenced, awaiting
+DTC review); compare only figures computed under the same rules. Across the nine line
+lists from 8 Aug to 24 Oct 2026, all recomputed with these rules on 2 Nov 2026 for the
+CDC technical session: EAC commenced rose from 70.4% to 80.5% and completed from 50.5%
+to 56.7%; awaiting DTC review rose from 95 to 176.
 
 ## 6. Repo layout
 
 ```
 ├── PROJECT_STATUS.md                 ← this file
 ├── EAC_Indicator_Definitions_and_Data_Analysis_Plan_v3_1.md   ← the spec
-├── docs/DECISIONS_AND_INCIDENTS.md   ← standing rules, decisions 1–21
+├── docs/DECISIONS_AND_INCIDENTS.md   ← standing rules, decisions 1–25
+├── TECHNICAL_DOSSIER.md              ← architecture, data flow and security, for IT review
 ├── docs/RUNBOOK_pipeline.md          ← the weekly de-identification routine
 ├── docker-compose.yml, .env.example, DEPLOY.md
 ├── backend/
@@ -245,4 +255,4 @@ vault; locate the drug, VL history and appointment file.
 - **No hallucinated figures** — every number is checked against the data.
 - Work only from de-identified parquet, logs and the dashboard database; diagnostics
   print counts and shapes, never identifiers.
-- Changes ship live to `/app` for Es to judge, not as mock-ups.
+- Changes ship live (locally, at `/`) for Es to judge, not as mock-ups.

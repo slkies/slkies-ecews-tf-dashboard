@@ -6,11 +6,19 @@ ECEWS domain and integration with the ECEWS Central Data Repository.
 
 | | |
 |---|---|
-| Document version | 1.1 |
-| Date | 3 August 2026 |
-| Application commit | `0815bbc` |
+| Document version | 1.2 |
+| Date | 2 November 2026 |
+| Application version | 2.2, commit `63fc149` |
 | Prepared by | Data Analytics Lead, ECEWS/SPEED Program |
 | Status | For review |
+
+**Changes since 1.1 (3 August 2026):** the dashboard is now a React application
+built into the same image (version 2.0, 23 October); the repository is public
+so that ECEWS IT can deploy from it, and holds no data or credentials; there are
+no default passwords (an unset seed password means the account is not created);
+client search and the client record were added, both audited and scoped
+(version 2.1); administrators can change an account's role and scope and delete
+it; test counts, routes, configuration and figures are brought up to date.
 
 This document answers the five items requested, in the order requested
 (sections 1–5). Sections 6–8 cover the security controls, known limitations and
@@ -36,8 +44,8 @@ source system. It creates no new patient data.
 
 The unit is the **treatment-failure episode**, not the client. A client who is
 unsuppressed, undergoes EAC, re-suppresses and later fails again represents two
-episodes. Episodes are keyed on `(S/N, index VL date)`. In the current snapshot,
-3,489 distinct clients account for 3,797 episodes.
+episodes. Episodes are keyed on `(S/N, index VL date)`. In the line list of
+24 October 2026, 4,301 distinct clients account for 4,860 episodes.
 
 ### 0.3 Data classification
 
@@ -49,6 +57,12 @@ This is the single most important framing point for the review.
   other than the pseudonymous `S/N`) is **removed upstream, before the export
   reaches this application**. The application never receives, requests or stores
   direct identifiers.
+- The removal is done by the de-identification pipeline
+  (`docs/RUNBOOK_pipeline.md`), run weekly on one secured machine. It replaces
+  each client's DATIM code and PEPID with a random S/N held in a key vault that
+  is never uploaded, removes 13 identifier fields, checks again after removal,
+  and publishes nothing if an identifier survives or the key match falls below
+  95%.
 - The data nevertheless remains **sensitive and potentially re-identifiable in
   context**, since it combines facility, LGA of residence, age, sex and clinical
   timeline. It is treated throughout as confidential PEPFAR/CDC programme data.
@@ -59,7 +73,7 @@ This is the single most important framing point for the review.
 ### 0.4 Architecture at a glance
 
 ```
-   Bi-weekly workbook (.xlsx or .parquet.zip)
+   De-identified line list (.parquet.zip, or .xlsx)
                 │
                 │  HTTPS upload, administrator only
                 ▼
@@ -80,7 +94,7 @@ This is the single most important framing point for the review.
    └───────────────────┬──────────────────────┘
                        │  aggregated, scope-filtered
                        ▼
-   Single-page dashboard (static HTML/JS, no build step)
+   React dashboard, built into the same image and served at /
 ```
 
 Three processes in total: application container, database, browser. There is no
@@ -93,11 +107,17 @@ third-party analytics or telemetry.
 
 ### 1.1 Repository
 
-The complete source is a single Git repository, currently private, comprising
-35 tracked files. **No patient data has ever been committed**; the `.gitignore`
-excludes `*.xlsx`, `*.parquet`, `*.parquet.zip` and `.env`, this is additionally
-enforced by a CI check that fails the build (section 1.5), and it can be
-confirmed against the full commit history.
+The complete source is a single Git repository of 201 tracked files, public on
+GitHub (`slkies/slkies-ecews-tf-dashboard`) so that the ECEWS IT team can deploy
+from it. Being public, it holds **no patient data, no credentials and no
+identifiers**. The `.gitignore` excludes `*.xlsx`, `*.parquet`, `*.parquet.zip`
+and `.env`; this is additionally enforced by a CI check that fails the build
+(section 1.5), and it can be confirmed against the full commit history.
+Credentials live only in `.env` (not tracked) or the host's secret store.
+
+Two branches: `develop`, where work happens, and `main`, which holds only
+released work and is what the host deploys. Each release is versioned and
+tagged, and `/api/version` reports the version and commit being served.
 
 For handover, the repository can be transferred to an ECEWS GitHub organisation
 or supplied as a bundle, at ECEWS's preference.
@@ -117,7 +137,11 @@ or supplied as a bundle, at ECEWS's preference.
 | `backend/scripts/to_parquet.py` | Workbook → Parquet converter (operator tool) |
 | `backend/tests/test_indicators.py` | Unit tests for the indicator logic |
 | `backend/tests/test_api.py` | API integration tests, incl. the security controls |
+| `backend/tests/test_version.py` | Version reporting |
 | `backend/tests/conftest.py` | Test fixtures and database setup |
+| `frontend/src/**/*.test.tsx` | Dashboard tests, one file per page |
+| `backend/scripts/deidentify.py` | The de-identification pipeline (operator tool, run offline) |
+| `backend/scripts/bump_version.py`, `deploy.ps1` | Release and local deploy |
 | `.github/workflows/ci.yml` | Continuous integration pipeline |
 | `backend/Dockerfile` | Container image definition |
 | `backend/requirements.txt` | Pinned dependencies |
@@ -144,6 +168,11 @@ All are mainstream, actively maintained packages. There is deliberately **no
 scipy, statsmodels or scikit-learn**: the statistical routines are implemented
 directly in numpy to keep the dependency surface small and auditable.
 
+The dashboard is React 19 with TypeScript, Vite, Tailwind CSS and Chart.js, its
+packages pinned in `frontend/package-lock.json`. It is compiled in the first
+stage of the Docker build (`node:22-slim`) and only the compiled files are
+copied into the Python image; nothing is fetched from a third party at runtime.
+
 ### 1.4 Build and run
 
 ```bash
@@ -156,12 +185,15 @@ ECEWS reverse proxy.
 
 ### 1.5 Testing and continuous integration
 
-93 test functions, expanding to **142 test cases**, in two suites:
+**363 automated tests** (2 November 2026): 150 server test functions expanding
+to **215 test cases**, and **148 dashboard tests**.
 
 | Suite | Covers |
 |---|---|
-| `test_indicators.py` | Indicator logic: the decision tree, temporal matching, negative-time exclusion, `S/N` precision, repeat episodes, schema drift between exports, success-censoring detection |
+| `test_indicators.py` | Indicator logic: the decision tree, temporal matching, negative-time exclusion, `S/N` precision, repeat episodes, schema drift between exports, success-censoring detection, and each EAC rule agreed with the programme (extended EAC, one EAC cycle per episode, cycles counted per client) |
 | `test_api.py` | The API surface, and specifically **every security control claimed in section 6** |
+| `test_version.py` | The version and commit reported by `/api/version` |
+| Dashboard (`vitest`) | Each page and shared component, against synthetic data |
 
 The API suite runs against a real PostgreSQL instance rather than a mock.
 Row-level scoping, the lockout counter and `ON DELETE CASCADE` are database
@@ -179,9 +211,10 @@ among other things, that:
 - the audit trail exposes no write route;
 - a failed upload leaves the previous snapshot current and intact.
 
-**Continuous integration** (`.github/workflows/ci.yml`) runs the full suite on
-every push and pull request against a PostgreSQL 16 service container. Two
-additional guards fail the build outright:
+**Continuous integration** (`.github/workflows/ci.yml`) runs on every push to
+`main` and `develop` and on every pull request: the server suite against a
+PostgreSQL 16 service container, then the dashboard's type check, its tests and
+a full production build. Two additional guards fail the build outright:
 
 1. **No patient data may be tracked in git.** `.gitignore` covers this, but a
    forced add or a renamed extension would slip past it, and the data is
@@ -208,7 +241,7 @@ Seven tables. The complete definition is `backend/app/schema.sql`.
 |---|---|---|
 | `users` | Accounts, bcrypt password hashes, role, row scope | Credentials |
 | `uploads` | One immutable row per ingest: filename, as-of date, counts, warnings, source-sheet manifest | Metadata |
-| `cohort` | **The derived patient-level cohort** — one row per failure episode, 73 columns | Patient data |
+| `cohort` | **The derived patient-level cohort** — one row per failure episode, 88 columns | Patient data |
 | `dq_findings` | Data-quality findings per upload | Metadata |
 | `feedback` | In-app user feedback | Low |
 | `usage_log` | One row per authenticated request, for the usage panel | Operational |
@@ -327,9 +360,10 @@ wrong LGA on a map used to target outreach is worse than a reported gap.
 
 ### 3.6 Validation
 
-Eighteen data-quality check definitions run on every upload. Several are
-evaluated once per sheet, so the number of findings recorded depends on how many
-sheets the workbook carries. They cover, among others:
+Twenty data-quality check definitions run on every upload, plus one at upload
+time for a line list dated earlier than the current one (section 5.3). Several
+are evaluated once per sheet, so the number of findings recorded depends on how
+many sheets the workbook carries. They cover, among others:
 
 - missing or blank client keys
 - a post-EAC sample still at the laboratory, whose result columns therefore
@@ -419,13 +453,21 @@ Passwords are managed as follows:
 
 - an administrator sets the username, email and initial password when creating the account, and can
   **reset** any account's password without knowing the old one, which is how a
-  forgotten or still-default password is recovered;
+  forgotten password is recovered;
 - **users change their own** password from the header, and must supply their
   current one to do so, so an unattended signed-in browser cannot be used to
   lock the real owner out;
 - minimum length is **10 characters**, configurable through
-  `MIN_PASSWORD_LENGTH`; the known seeded defaults are refused outright;
-- every reset, change and failed change attempt is written to the audit trail.
+  `MIN_PASSWORD_LENGTH`; common defaults (such as `changeme` or `password`) are
+  refused outright;
+- **there are no default passwords in the code.** The administrator and the
+  optional shared viewer account are created on first start only if
+  `ADMIN_PASSWORD` / `VIEWER_PASSWORD` are set; unset means the account is not
+  created;
+- administrators can change an account's role and scope, disable it, or delete
+  it when a member of staff leaves;
+- every creation, reset, change, failed change attempt, role change and
+  deletion is written to the audit trail.
 
 ### 4.3 Roles
 
@@ -441,7 +483,7 @@ Each account may carry `scope_state` and/or `scope_facility`. Where set, the
 account can only ever see rows matching that scope.
 
 This is enforced at a **single chokepoint**: every query for cohort data passes
-through one function (`_load`), used by all 15 data endpoints, and **scope
+through one function (`_load`), used by every data endpoint, and **scope
 overrides any filter the client requests**. A viewer scoped to Delta cannot
 obtain Osun data by manipulating a request parameter, and the CSV export path
 uses the same function, so it inherits the same restriction.
@@ -457,7 +499,18 @@ and is never relied upon for enforcement.
 
 Exporting the patient-level line list as CSV is restricted to `analyst` and
 `admin`. Both successful and denied attempts are recorded in the audit trail,
-including the exact filter slice and row count.
+including the exact filter slice and row count. Exporting rows chosen in a
+table is the same server-side export, so it carries the same restriction and
+the same audit; the browser never assembles a file of patient rows itself.
+
+### 4.7 Client search and the client record
+
+Since version 2.1, any role can find one client by S/N (or part of it), or by
+facility plus one detail, and open that client's record: every failure episode,
+viral load dates, EAC session dates, last pickup and next scheduled visit. Both
+pass through the same scope chokepoint, so a facility account finds only its own
+clients, and **every search and every record opened is written to the audit
+trail**. The record holds no name or PEPID; the dashboard still holds none.
 
 ---
 
@@ -553,6 +606,8 @@ which sheets a given set of figures was built from.
 | No patient data in source control | Implemented, and enforced by CI |
 | Automated regression tests over the controls above | Implemented (see 1.5) |
 | Password reset and self-service change | Implemented (see 4.2) |
+| No default passwords in code | Implemented (see 4.2) |
+| Client search and record views audited and scoped | Implemented (see 4.7) |
 | Raw upload not persisted | Implemented (see 3.8) |
 | Transport encryption | Provided by the hosting layer (see 8.3) |
 | Encryption at rest | Provided by the database host (see 8.3) |
@@ -560,9 +615,9 @@ which sheets a given set of figures was built from.
 ### 6.1 Audit trail detail
 
 `audit_log` records: authentication successes, failures and lockouts;
-patient-level record views and CSV exports, with the filter slice and row count;
-and every upload, snapshot deletion, prune, user creation and user activation
-change. Each row carries timestamp, user id, email as written at the time,
+patient-level record views, client searches and CSV exports, with the filter
+slice and row count; and every upload, snapshot deletion, prune, user creation,
+role or scope change, activation change, deletion and password reset. Each row carries timestamp, user id, email as written at the time,
 action, detail and originating IP address (honouring the proxy header set by the
 hosting layer).
 
@@ -603,17 +658,17 @@ baseline.
 | 2 | No audit trail | High | **Resolved** — `audit_log` implemented |
 | 3 | No brute-force protection on sign-in | Medium | **Resolved** — lockout implemented |
 | 4 | Any authenticated user could export the full line list | Medium | **Resolved** — restricted to analyst/admin and logged |
-| 5 | EMR free-text rendered unescaped into the DOM in six places | Medium | **Resolved** — all data-derived strings now HTML-escaped; vector was a malformed upload, not a public form |
+| 5 | EMR free-text rendered unescaped into the DOM in six places | Medium | **Resolved** — all data-derived strings HTML-escaped; since version 2.0 the React dashboard escapes all rendered text by default. The vector was a malformed upload, not a public form |
 | 6 | An export omitting an optional column aborted the whole upload with an opaque error | Medium | **Resolved** — missing optional columns now degrade to "not recorded"; found by the new API tests |
-| 7 | Seed accounts are created with default passwords | High | **Open** — must be rotated at deployment; see 8.4 |
+| 7 | Seed accounts were created with default passwords | High | **Resolved** — no defaults in code; an unset seed password means the account is not created (4.2) |
 | 8 | Password policy | Medium | **Largely resolved** — 10-character floor (configurable), known defaults refused, admin reset and self-service change; complexity rules and expiry still pending ECEWS policy |
 | 9 | Filter lists (LGA names) are not scope-filtered | Low | **Open** — exposes place names, no patient data |
 | 10 | Uploads >1 MB spool briefly to container-local `/tmp` | Low | **Open** — see 3.8 |
 | 11 | No automated schema down-migration | Low | Accepted by design |
 | 12 | No multi-factor authentication | — | **Not implemented** — available if ECEWS requires it |
 
-Items 7 and 8 are deployment and policy decisions rather than code defects, and
-we would welcome ECEWS's standard on both.
+Items 8 and 12 are policy decisions rather than code defects, and we would
+welcome ECEWS's standard on both.
 
 ---
 
@@ -625,7 +680,7 @@ we would welcome ECEWS's standard on both.
 - PostgreSQL 16 or later
 - Outbound internet access is **not** required at runtime
 - Approximate footprint: 1 vCPU, 1 GB RAM for the application; the database is
-  small — the current cohort is under 4,000 rows
+  small — the cohort is about 4,900 rows per line list (October 2026)
 
 ### 8.2 Configuration
 
@@ -651,10 +706,11 @@ host.
 1. Set `APP_ENV=production`.
 2. Generate and set a strong `JWT_SECRET`.
 3. Set `DATABASE_URL` to the ECEWS-provisioned database.
-4. Set `ADMIN_PASSWORD` / `VIEWER_PASSWORD` before first start — **note that
-   these apply only at account creation**; an account that already exists must
-   have its password reset through the interface.
-5. Rotate or remove the shared `viewer@ecews.org` test account.
+4. Set `ADMIN_PASSWORD` before first start, or the administrator account is not
+   created. It applies only at creation; an account that already exists has its
+   password changed through the interface. Leave `VIEWER_PASSWORD` unset unless
+   a shared read-only account is wanted.
+5. Once named accounts exist, delete any shared account that was created.
 6. Set `CORS_ORIGINS` to the hosting origin.
 7. Confirm TLS termination and HTTP→HTTPS redirection.
 8. Confirm database backup schedule and retention.
@@ -663,27 +719,38 @@ host.
 
 ## Appendix A — API endpoints
 
-34 routes. All require authentication except `/api/health` and `/api/login`.
+44 API routes. All require authentication except `/api/login`, `/api/health`
+and `/api/version`.
 
-**Authentication:** `POST /api/login`, `GET /api/me`
+**Authentication and own account:** `POST /api/login`, `GET /api/me`,
+`POST /api/me/password`
 
-**Patient-level (audited):** `GET /api/clients`, `GET /api/export` *(analyst/admin)*
+**Patient-level (audited, scope-filtered):** `GET /api/clients`,
+`GET /api/client-search`, `GET /api/client/{sn}`, `GET /api/risk` (its
+lowest-chance list), `GET /api/dtc/awaiting`, `GET /api/dtc/trajectory`, `GET`
+and `POST /api/export` *(export: analyst/admin)*
 
 **Aggregate analytics (scope-filtered):** `/api/summary`, `/api/overview`,
 `/api/cascade`, `/api/breakdown/{by}`, `/api/plans`, `/api/time-metrics`,
-`/api/survival`, `/api/unsupp-curve`, `/api/risk`, `/api/mortality`,
-`/api/deep-dive`, `/api/profile`, `/api/dtc`, `/api/filters`
+`/api/survival`, `/api/unsupp-curve`, `/api/mortality`, `/api/deep-dive`,
+`/api/profile`, `/api/dtc`, `/api/worklists` (counts only), `/api/compare`,
+`/api/filters`
 
-**Data quality:** `GET /api/dq`
+**Data quality and line lists:** `GET /api/dq`, `GET /api/uploads` (the list of
+loaded line lists, for comparison)
 
-**Administration (admin only):** `POST /api/uploads`, `GET /api/uploads`,
-`DELETE /api/uploads/{uid}`, `POST /api/uploads/prune`, `GET /api/users`,
-`POST /api/users`, `PATCH /api/users/{uid}`, `GET /api/audit`,
-`GET /api/feedback`
-
-**Unauthenticated:** `GET /api/health` (liveness only, returns no data)
+**Administration (admin only):** `POST /api/uploads`, `DELETE /api/uploads/{uid}`, `POST /api/uploads/prune`, `GET /api/users`,
+`POST /api/users`, `PATCH /api/users/{uid}`, `DELETE /api/users/{uid}`,
+`POST /api/users/{uid}/access`, `POST /api/users/{uid}/password`,
+`GET /api/audit`, `GET /api/usage`, `GET /api/feedback`, `GET /api/diagnostics`
 
 **Feedback:** `POST /api/feedback`
+
+**Unauthenticated:** `GET /api/health` (liveness only, returns no data);
+`GET /api/version` (version, commit and page hash only)
+
+Outside `/api`, old `/app` links redirect permanently to `/`, and the two map
+boundary files are served as static files.
 
 ## Appendix B — Environment variables
 
@@ -693,11 +760,15 @@ host.
 | `JWT_SECRET` | Yes in production | Session token signing key |
 | `APP_ENV` | Recommended | `production` (default) enforces the above |
 | `JWT_TTL_HOURS` | No | Session lifetime, default 12 |
-| `ADMIN_PASSWORD` | First start | Seed administrator password |
-| `VIEWER_PASSWORD` | First start | Seed viewer password |
+| `ADMIN_PASSWORD` | First start | Seed administrator password; unset means the account is not created |
+| `VIEWER_PASSWORD` | No | Optional shared viewer account; unset means it is not created |
+| `MIN_PASSWORD_LENGTH` | No | Minimum password length, default 10 |
 | `LOGIN_LOCKOUT_FAILS` | No | Failed attempts before lockout, default 5 |
 | `LOGIN_LOCKOUT_MINUTES` | No | Lockout window, default 15 |
+| `SESSION_GAP_MINUTES` | No | Inactivity gap that ends a session in the usage panel |
 | `CORS_ORIGINS` | Recommended | Permitted browser origins |
+| `DB_PASSWORD` | Docker Compose | Database password for the local two-container stack |
+| `GIT_COMMIT` | Build | Commit reported by `/api/version`, set at image build |
 | `PORT` | Platform | Injected by the host if applicable |
 
 ## Appendix C — Accompanying documents
@@ -705,5 +776,8 @@ host.
 - `EAC_Indicator_Definitions_and_Data_Analysis_Plan_v3_1.md` — indicator
   definitions, inclusion criteria and analysis plan
 - `DEPLOY.md` — deployment runbook
+- `docs/RUNBOOK_pipeline.md` — the weekly de-identification routine
+- `docs/DECISIONS_AND_INCIDENTS.md` — standing rules, numbered decisions and incidents
+- `PROJECT_STATUS.md` — current state, figures and pending work
 - `README.md` — developer orientation
 - `.env.example` — annotated configuration reference

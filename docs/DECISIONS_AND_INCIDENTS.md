@@ -431,9 +431,10 @@ run monthly (median gap 31 days), so a session 4 at day 28 counts; one after day
 60 is shown on the client record but not counted.
 
 **A follow-up sample during EAC** is any sample dated on or after session 1 and
-before session 3, whether or not counselling carried on afterwards (610 to 648).
-The old rule caught it only when a later session was never held. The cascade
-shows these, and samples taken before EAC began (506), under the follow-up sample
+before session 3, whether or not counselling carried on afterwards (610 to 648;
+706 after decision 23). The old rule caught it only when a later session was never
+held. The cascade shows these, and samples taken before EAC began (506; 51 after
+decision 23), under the follow-up sample
 step, each opening its worklist, for root-cause review.
 
 **Waiting for the next visit is not overdue.** A client who completed EAC, has no
@@ -442,7 +443,13 @@ dispensed, else the pharmacy's estimate) falls within 60 days of completing EAC
 and is still ahead, is likely to have the VL drawn at that visit. They move from
 *Completed EAC 30+ days ago, no post-EAC VL sample* to their own Low-priority list,
 *Completed EAC, VL expected at the next scheduled visit* (131 of 921 on the 24 Oct
-list). Once the visit date passes with no sample they return to the overdue list.
+list; 101 of 722 after decision 23). Once the visit date passes with no sample they
+return to the overdue list.
+
+The figures in this entry were counted before decision 23, later the same day,
+which gave each failure episode its own EAC cycle. Where decision 23 changed a
+figure, the 24 Oct value under the current rules follows it. The extended EAC
+count (379) did not change.
 
 Also: the Overview's follow-up VL tile shows samples first, then results (as the
 cascade does), so it compares like with like with the post-EAC sample tile.
