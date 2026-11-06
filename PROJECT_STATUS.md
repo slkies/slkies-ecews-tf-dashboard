@@ -1,6 +1,6 @@
 # ECEWS TF Monitor — Project Status & Handoff
 
-**Last updated:** 2 Nov 2026
+**Last updated:** 6 Nov 2026
 **Owner:** Es (Data Analytics Lead, ECEWS / SPEED Program — PEPFAR/CDC, Nigeria)
 **Purpose:** Online, multi-user web app for HIV ART **treatment-failure (TF)** and
 **EAC** monitoring across Delta, Osun, Ekiti. An admin loads the de-identified line
@@ -19,6 +19,14 @@ repo is public. Credentials live in `.env` (gitignored) or the host's secret sto
 ---
 
 ## 1. Where things run
+
+**On `develop`, not yet released** (6 Nov 2026), from the CDC special session of
+4 Nov: the header shows the age of the current line list; every rule on the
+Guidelines page cites its section and page in the 2024 national guidelines; Advanced
+analytics reports the checks on the re-suppression model, and its adjusted intervals
+are clustered on the client (decision 26); a facility account lands on its own
+Facility home page. These are computed when a page is opened, so no new upload is
+needed for them, but the 31 Oct line list still has to be loaded on the live site.
 
 **Version 2.2** (30 Oct 2026): EAC rules corrected (decisions 22 to 25): extended EAC is
 this cycle's session 4 within 60 days of session 3; follow-up samples during EAC are
@@ -61,12 +69,14 @@ docker compose up -d --build        # http://localhost:8080 (compose maps 8080 -
     -e TEST_DATABASE_URL="postgresql://<user>:<password>@db:5432/ecews_test" \
     -v "$(pwd)/backend:/work" -w /work ecews_tf_monitor-api pytest -q
   ```
-  **215 passing** (30 Oct 2026).
-- **Frontend tests:** `cd frontend && npx vitest run` — **148 passing**. Type check:
-  `npx tsc --noEmit`.
+  **225 passing** (6 Nov 2026).
+- **Frontend tests:** `cd frontend && npx vitest run` — **174 passing**. Type check:
+  `npx tsc --noEmit`. On a busy machine a few tests can run past the 1-second wait
+  for a page to appear; each passes when its file is run on its own.
 - **Harness pages** (`/harness-*.html` on the Vite dev server) render each page
   with synthetic data and no backend, for checking in a real browser without
-  signing in.
+  signing in. `harness-shell.html?facility=1` shows the dashboard as a facility
+  account sees it.
 
 **Loading a line list:** run the weekly pipeline (`docs/RUNBOOK_pipeline.md`), then
 Admin → Line lists → load the de-identified parquet zip. **Set the line-list date to
@@ -86,10 +96,11 @@ windows.
 | Worklists | Nine action lists ranked High / Medium / Low by clinical urgency, each with its next step, plus context and data-check lists; sortable table, server-side audited export (admin/analyst) |
 | Client search | Find one client by S/N (or part of it), or by facility plus one detail; opens the client record |
 | Treatment plans | Plans A–H with the reason each applies, split by sex; a plan opens its clients |
-| Advanced analytics | Factors for re-suppression (forest plot, univariate and adjusted table), baseline CD4, the risk model with calibration and the lowest-chance list, mortality |
+| Advanced analytics | Factors for re-suppression (forest plot, univariate and adjusted table), the model checks (convergence, events per parameter, collinearity, fit, c-statistic, linearity, separation, repeat episodes), baseline CD4, the risk model with calibration and the lowest-chance list, mortality |
 | Data quality | Every check from the current upload, cohort checks apart from source-file checks |
-| Guidelines | 2024 national EAC guidance and where each rule is measured |
+| Guidelines | 2024 national EAC guidance, each rule cited by section and printed page, and where each is measured; programme rules not in the guidelines are marked |
 | Methodology | Unit of analysis, cohort, who counts as a gap, definitions, data sources (every sheet read), known gaps |
+| Facility home | For facility accounts only: the action lists with clients on them, the five clients unsuppressed longest, the full cascade, the facility's own data-quality findings (12 of the 14 cohort checks; ART start and session order need columns the stored cohort does not keep), and a feedback form. Filters without state, LGA of service or facility |
 | Admin | Load line lists, upload history, deployment check, users and access (add, change role and scope, disable, delete, reset password), usage, feedback, audit trail |
 
 **Client record** (v2.1): every failure episode for one client, newest first — index VL
@@ -99,13 +110,15 @@ table; Back returns to the same list and scroll position. Table searches on Work
 Treatment plans and DTC review match the facility or the S/N. Searches and records
 cover the account's area only and are audited; the dashboard still holds no PEPID.
 
-The header carries data notices (serious cohort problems), the theme toggle, and the
-account menu: change your own password, send feedback, sign out. Every summary table
+The header carries the date and age of the current line list (amber after 7 days),
+data notices (serious cohort problems), the theme toggle, and the account menu: change your own password, send feedback, sign out. Every summary table
 sorts; female and male keep one colour pair everywhere.
 
 **Roles:** admin / analyst / viewer. Viewers and analysts see everything except
 Admin; analysts can also export. A state or facility scope limits everything an
-account sees, exports included.
+account sees, exports included. A facility account (facility scope, not admin)
+lands on Facility home and sees a short menu: Facility home, Worklists, Client
+search, Treatment plans and the guide.
 
 ## 4. Locked analytical rules (do not silently change)
 
@@ -181,12 +194,29 @@ lists from 8 Aug to 24 Oct 2026, all recomputed with these rules on 2 Nov 2026 f
 CDC technical session: EAC commenced rose from 70.4% to 80.5% and completed from 50.5%
 to 56.7%; awaiting DTC review rose from 95 to 176.
 
+**Time to EAC by month** (24 Oct line list, computed offline on 4 Nov 2026 for the CDC
+session; not a dashboard page). Days from the index VL result date to EAC session 1,
+for clients in care or retested who started EAC, grouped by the month the index result
+was received. The median fell from 54 days (July 2025) to 19 (October 2025) and has held
+between 16 and 27 days in every month of 2026. A Kaplan-Meier median, which keeps
+clients not yet started in the count until the line-list date, gives the same picture:
+62 and 67 days in July and August 2025, 19 to 29 days in every month of 2026. The fall
+predates TF Monitor, so the gains since launch are in how many clients start EAC, not
+how fast. September 2026 is provisional (results received late in the month had under
+30 days to start); October 2026 is a part month and is left out.
+
+**Re-suppression model checks** (31 Oct line list, 6 Nov 2026). With clustering, all
+seven checks are met; the c-statistic (0.671) is shown for context. 2,497 modelled
+episodes come from 2,327 clients, so the adjusted intervals are clustered on the
+client: standard errors widen by up to 1.20 times, and male sex reads 0.79
+(0.63–1.00) instead of 0.79 (0.64–0.98), no longer significantly lower (decision 26).
+
 ## 6. Repo layout
 
 ```
 ├── PROJECT_STATUS.md                 ← this file
 ├── EAC_Indicator_Definitions_and_Data_Analysis_Plan_v3_1.md   ← the spec
-├── docs/DECISIONS_AND_INCIDENTS.md   ← standing rules, decisions 1–25
+├── docs/DECISIONS_AND_INCIDENTS.md   ← standing rules, decisions 1–26
 ├── TECHNICAL_DOSSIER.md              ← architecture, data flow and security, for IT review
 ├── docs/RUNBOOK_pipeline.md          ← the weekly de-identification routine
 ├── docker-compose.yml, .env.example, DEPLOY.md
@@ -214,10 +244,14 @@ to 56.7%; awaiting DTC review rose from 95 to 176.
    Optional.
 2. **EAC uptake by month** — withdrawn. If rebuilt, recent months must be marked
    provisional: uptake in a young month is low because commencing takes a median of
-   25 days, not because teams stopped.
+   22 days (24 Oct line list), not because teams stopped. The monthly time-to-EAC
+   series in section 5 shows the method.
 3. **Per-client hover timeline** (ART start, every VL, regimen changes, interruptions,
    missed appointments on one date axis) — waits for the drug, VL history and
    appointment file (Es to locate).
+
+**From the CDC session (4 Nov 2026), advice owed to Es:** the risk model, a
+data-protection note, evidence of impact, and stochastic models.
 
 **Dropped (Es, 23 Oct 2026):** click-to-filter cards (the clickable map is enough);
 bulk user creation by spreadsheet (the HI team will handle accounts).
