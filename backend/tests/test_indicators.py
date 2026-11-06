@@ -796,3 +796,110 @@ def test_cycles_are_counted_from_the_clients_own_episodes():
                      as_of=pd.Timestamp("2026-10-24"), mode="snapshot").df.sort_values("idx_date")
     assert d["eac_cycle_no"].tolist() == [1, 2, 3]
     assert d["dtc_review"].tolist() == [False, False, True]
+
+
+# ── adjusted-odds-ratio model diagnostics (CDC session, 4 Nov 2026) ────
+def _dd_frame(n=1500, seed=7, yrs_effect=None, repeat=1):
+    """A synthetic retested cohort for deep_dive, with a known outcome model."""
+    rng = np.random.default_rng(seed)
+    yrs = rng.uniform(0.5, 15, n)
+    sex = rng.choice(["Female", "Male"], n)
+    lin = 1.0 - 0.4 * (sex == "Male") + (yrs_effect(yrs) if yrs_effect else 0.03 * yrs)
+    y = rng.random(n) < 1 / (1 + np.exp(-lin))
+    df = pd.DataFrame({
+        "sn": [f"c{i}" for i in range(n)], "post_result": True, "resuppressed": y,
+        "sex": sex, "age_band": rng.choice(["10-19", "20-24", "25-34", "35-49", "50+"], n),
+        "state": rng.choice(["Delta", "Osun", "Ekiti"], n),
+        "on_second_line": rng.random(n) < 0.2,
+        "vl_magnitude": rng.choice(["1k-10k", "10k-100k", ">=100k"], n),
+        "marital": rng.choice(["Married", "Never married"], n),
+        "job": rng.choice(["Employee", "Unemployed"], n),
+        "education": rng.choice(["Primary", "Secondary", "Tertiary"], n),
+        "days_on_art": yrs * 365, "cd4_band": None,
+    })
+    return pd.concat([df] * repeat, ignore_index=True)
+
+
+def _checks(df):
+    from app.indicators import deep_dive
+    r = deep_dive(df)
+    return {c["key"]: c for c in r["diagnostics"]["checks"]}, r
+
+
+def test_model_diagnostics_pass_on_a_correctly_specified_model():
+    c, r = _checks(_dd_frame())
+    assert set(c) == {"converged", "epv", "collinearity", "fit", "auc",
+                      "linearity", "separation", "clustering"}
+    for k in ("converged", "epv", "collinearity", "linearity", "separation", "clustering"):
+        assert c[k]["status"] == "pass", (k, c[k]["result"])
+    assert c["auc"]["status"] == "info"
+    assert r["diagnostics"]["n_check"] == sum(v["status"] == "check" for v in c.values())
+
+
+def test_box_tidwell_flags_a_non_linear_years_on_art_effect():
+    # Re-suppression climbs steeply over the first years, then flattens: one
+    # odds ratio per year cannot describe that, and the check must say so.
+    c, _ = _checks(_dd_frame(n=4000, yrs_effect=lambda x: 3 * np.log(x)))
+    assert c["linearity"]["status"] == "check"
+
+
+def test_clustering_on_the_client_undoes_duplicated_episodes():
+    # Every client entered three times: naive errors shrink by about sqrt(3) and
+    # spurious significance appears; clustered errors must not be fooled.
+    from app.indicators import _cluster_se, _logit_newton
+    df = _dd_frame(n=600, seed=3)
+    X = np.column_stack([np.ones(len(df)), (df["sex"] == "Male").to_numpy(float)])
+    y = df["resuppressed"].to_numpy(int)
+    b1, cov1, _ = _logit_newton(X, y)
+    X3, y3 = np.vstack([X] * 3), np.concatenate([y] * 3)
+    b3, cov3, _ = _logit_newton(X3, y3)
+    naive = np.sqrt(np.diag(cov3))
+    clustered = _cluster_se(X3, y3, b3, cov3, np.concatenate([df["sn"].to_numpy()] * 3))
+    single = np.sqrt(np.diag(cov1))
+    assert naive[1] < single[1] * 0.65                        # the naive SE is fooled
+    assert clustered[1] == pytest.approx(single[1], rel=0.1)  # the clustered SE is not
+
+
+def test_hosmer_lemeshow_and_auc_helpers():
+    from app.indicators import _auc, _hosmer_lemeshow
+    rng = np.random.default_rng(1)
+    p = rng.uniform(0.05, 0.95, 5000)
+    y = (rng.random(5000) < p).astype(int)
+    _, df_, pval = _hosmer_lemeshow(y, p)
+    assert df_ == 8 and pval > 0.01                  # calibrated by construction
+    _, _, pbad = _hosmer_lemeshow(y, np.clip(p * 0.5, 0, 1))
+    assert pbad < 0.001                              # halved predictions are miscalibrated
+    assert _auc(np.array([0, 0, 1, 1]), np.array([.1, .2, .8, .9])) == 1.0
+    assert _auc(np.array([1, 1]), np.array([.1, .2])) is None
+
+
+def test_gvif_detects_two_predictors_that_say_the_same_thing():
+    from app.indicators import _gvif
+    rng = np.random.default_rng(2)
+    a = rng.normal(size=500)
+    X = np.column_stack([np.ones(500), a, a + rng.normal(scale=0.05, size=500), rng.normal(size=500)])
+    g = _gvif(X, {"a": [1], "a2": [2], "z": [3]})
+    assert g["a"] > 5 and g["a2"] > 5 and g["z"] < 1.2
+
+
+def test_separation_is_a_level_where_everyone_or_no_one_re_suppressed():
+    df = _dd_frame(n=1500, seed=11)
+    ekiti = df["state"] == "Ekiti"
+    df.loc[ekiti, "resuppressed"] = True              # every Ekiti episode re-suppressed
+    c, _ = _checks(df)
+    assert c["separation"]["status"] == "check"
+    assert c["separation"]["result"] == "State: Ekiti"
+
+
+def test_adjusted_intervals_are_clustered_on_the_client():
+    # Decision 26. The same clients entered three times are still the same
+    # clients: the published adjusted interval must not narrow because of it.
+    from app.indicators import deep_dive
+
+    def male(df):
+        sexv = next(v for v in deep_dive(df)["variables"] if v["key"] == "_sex")
+        L = next(L for L in sexv["levels"] if L["level"] == "Male")
+        return np.log(L["aor_hi"]) - np.log(L["aor_lo"])
+
+    once, thrice = male(_dd_frame(n=1500, seed=5)), male(_dd_frame(n=1500, seed=5, repeat=3))
+    assert thrice == pytest.approx(once, rel=0.1)

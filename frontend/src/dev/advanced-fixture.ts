@@ -26,6 +26,16 @@ export const DD: DeepDive = {
   cd4: { coverage_pct: 48.1, n_known: 903, levels: [
     { level: '<200', n: 255, resupp: 188, rate: 73.7 }, { level: '>=200', n: 648, resupp: 529, rate: 81.6 },
     { level: 'Not recorded', n: 974, resupp: 762, rate: 78.2 }], test: 'Chi-square (recorded only)', test_p: 0.008 },
+  diagnostics: { n_pass: 7, n_check: 0, checks: [
+    { key: 'converged', label: 'Model fit converged', result: 'Yes', status: 'pass', note: 'The estimates settled.' },
+    { key: 'epv', label: 'Outcome events per parameter', result: '16.9 (405 of the rarer outcome, 24 parameters)', status: 'pass', note: 'At least 10 is the usual floor.' },
+    { key: 'collinearity', label: 'Collinearity between predictors', result: 'Highest adjusted GVIF 1.41 (Age band)', status: 'pass', note: 'Above 2.24, predictors blur each other.' },
+    { key: 'fit', label: 'Goodness of fit (Hosmer-Lemeshow, 10 groups)', result: 'χ² 9.12 on 8 df, p = 0.332', status: 'pass', note: 'Under 0.05, predicted and observed differ.' },
+    { key: 'auc', label: 'Discrimination (c-statistic)', result: '0.655', status: 'info', note: 'Reported for context.' },
+    { key: 'linearity', label: 'Linearity of years on ART (Box-Tidwell)', result: 'p = 0.611', status: 'pass', note: 'Under 0.05, the per-year effect is not constant.' },
+    { key: 'separation', label: 'Separation (a level that predicts the outcome perfectly)', result: 'None', status: 'pass', note: 'An infinite odds ratio.' },
+    { key: 'clustering', label: 'Clients with more than one episode', result: '1,877 episodes from 1,760 clients. Intervals are clustered on the client; treating episodes as independent would change no conclusion.', status: 'pass', note: 'Episodes of the same client are not independent.' },
+  ] },
 }
 
 export const RISK: Risk = {

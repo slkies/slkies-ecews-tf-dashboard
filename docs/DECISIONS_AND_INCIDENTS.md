@@ -497,3 +497,21 @@ stated assumption, labelled as such, not a forecast: the line list carries one V
 client, so there is no per-client trend to fit, and response is near all-or-nothing
 (median fall 3.3 log among those who re-suppressed, -0.1 among those who did not).
 
+
+## 26. Adjusted odds ratios allow for clients with more than one episode
+**6 Nov 2026** — Asked at the CDC session (4 Nov) whether the model's assumptions
+were met, we added the standard checks for the multivariable logistic model to
+Advanced analytics: convergence, outcome events per parameter, collinearity
+(adjusted GVIF), Hosmer-Lemeshow goodness of fit, the c-statistic, Box-Tidwell
+linearity for years on ART, separation, and repeat episodes. On the 31 Oct line list
+six pass and the c-statistic (0.671) is shown for context. The exception was
+independence: 2,497 modelled episodes come from 2,327 clients, and the model treated
+each episode as a separate person.
+
+The adjusted intervals and p-values are now cluster-robust on the client (Es). The
+odds ratios themselves do not change; the standard errors widen by up to 1.20 times.
+One conclusion moves: male sex, 0.79 (0.64–0.98) treated as independent, is 0.79
+(0.63–1.00) clustered, so it no longer reads as significantly lower re-suppression.
+The univariate odds ratios beside them are crude 2 × 2 figures and are not adjusted
+for this. The checks card names any factor whose reading would differ without
+clustering, so the comparison stays visible.
