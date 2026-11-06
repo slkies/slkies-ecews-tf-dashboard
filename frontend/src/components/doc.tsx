@@ -52,6 +52,20 @@ export function Callout({ children, tone = 'brand' }: { children: ReactNode; ton
   )
 }
 
+/**
+ * Where a statement comes from: section and page in the source document.
+ * Reviewers asked (CDC session, 4 Nov 2026) that every statement on the
+ * Guidelines page be referenced, so each one carries its own citation rather
+ * than relying on a list at the bottom of the page.
+ */
+export function Cite({ s, p }: { s: string; p: string }) {
+  return (
+    <cite data-section={s} className="ml-1 whitespace-nowrap text-[11px] not-italic tabular-nums text-muted-foreground">
+      (§{s}, p. {p})
+    </cite>
+  )
+}
+
 /** A plain two- or three-column reference table. */
 export function RefTable({ head, rows, right = [] }: { head: string[]; rows: ReactNode[][]; right?: number[] }) {
   return (
