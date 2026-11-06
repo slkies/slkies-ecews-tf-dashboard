@@ -903,3 +903,20 @@ def test_adjusted_intervals_are_clustered_on_the_client():
 
     once, thrice = male(_dd_frame(n=1500, seed=5)), male(_dd_frame(n=1500, seed=5, repeat=3))
     assert thrice == pytest.approx(once, rel=0.1)
+
+
+def test_cohort_findings_run_on_a_cohort_read_back_from_the_database():
+    # A facility account's findings are recomputed from the stored cohort, which
+    # keeps neither ART start nor the session 2 and 3 dates. Those two checks are
+    # left out rather than reported as zero; every other count is unchanged.
+    from app.ingest import cohort_findings
+    df = cohort([mk(Session_1_Date="2026-03-10"), mk(**{"S/N": "0.999999999999999"})]).df
+    full = {r["check_name"]: r["n_records"] for r in cohort_findings(df)}
+    stored = df.drop(columns=[c for c in ("art_start", "Session_1_Date", "Session_2_Date", "Session_3_Date")
+                              if c in df.columns])
+    slim = {r["check_name"]: r["n_records"] for r in cohort_findings(stored)}
+    assert "Index VL within 6 months of ART start" not in slim
+    assert "EAC session dates out of order" not in slim
+    assert slim == {k: v for k, v in full.items() if k in slim}
+    assert set(full) - set(slim) <= {"Index VL within 6 months of ART start", "EAC session dates out of order"}
+    assert cohort_findings(df.iloc[0:0]) == []

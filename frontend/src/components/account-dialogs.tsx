@@ -80,7 +80,8 @@ export function ChangePasswordDialog({ open, onOpenChange }: { open: boolean; on
   )
 }
 
-export function FeedbackDialog({ open, onOpenChange, page }: { open: boolean; onOpenChange: (o: boolean) => void; page: string }) {
+/** Sending feedback, shared by the account-menu dialog and the facility page. */
+function useFeedback(page: string) {
   const [msg, setMsg] = useState('')
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState<string | null>(null)
@@ -95,9 +96,15 @@ export function FeedbackDialog({ open, onOpenChange, page }: { open: boolean; on
     } catch (e2) { setErr(e2 instanceof Error ? e2.message : 'Could not send') }
     finally { setBusy(false) }
   }
+  const reset = () => { setSent(false); setErr(null) }
+  return { msg, setMsg, busy, err, sent, submit, reset }
+}
+
+export function FeedbackDialog({ open, onOpenChange, page }: { open: boolean; onOpenChange: (o: boolean) => void; page: string }) {
+  const { msg, setMsg, busy, err, sent, submit, reset } = useFeedback(page)
 
   return (
-    <Dialog open={open} onOpenChange={(o) => { onOpenChange(o); if (!o) { setSent(false); setErr(null) } }}>
+    <Dialog open={open} onOpenChange={(o) => { onOpenChange(o); if (!o) reset() }}>
       <DialogContent className="sm:max-w-md">
         <form onSubmit={submit} className="flex flex-col gap-4">
           <DialogHeader>
@@ -125,5 +132,29 @@ export function FeedbackDialog({ open, onOpenChange, page }: { open: boolean; on
         </form>
       </DialogContent>
     </Dialog>
+  )
+}
+
+/** The same form, on the page rather than in a dialog. */
+export function FeedbackForm({ page, prompt = 'What should we know?' }: { page: string; prompt?: string }) {
+  const { msg, setMsg, busy, err, sent, submit, reset } = useFeedback(page)
+  return (
+    <form onSubmit={submit} className="flex flex-col gap-3">
+      {err && <Alert variant="destructive"><AlertDescription>{err}</AlertDescription></Alert>}
+      {sent ? (
+        <div className="flex flex-wrap items-center gap-3">
+          <p role="status" className="text-sm">Thank you, sent.</p>
+          <Button type="button" variant="outline" size="sm" onClick={reset}>Send another</Button>
+        </div>
+      ) : (
+        <>
+          <div className="flex flex-col gap-1.5">
+            <Label htmlFor="fb-inline">{prompt}</Label>
+            <Textarea id="fb-inline" rows={4} value={msg} onChange={(e) => setMsg(e.target.value)} />
+          </div>
+          <Button type="submit" size="sm" className="self-start" disabled={busy || !msg.trim()}>{busy && <Spinner />}Send</Button>
+        </>
+      )}
+    </form>
   )
 }

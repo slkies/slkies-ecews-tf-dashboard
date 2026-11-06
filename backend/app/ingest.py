@@ -280,7 +280,32 @@ def dq_checks(sheets: dict[str, pd.DataFrame], infos: list[SheetInfo],
         add(i.name, "Inconsistent state casing", "medium", len(variants) if dup else 0,
             f"Found: {', '.join(variants)}. Normalised on ingest, but fix at source.")
 
-    c = cohort_df
+    cohort_checks(cohort_df, add)
+    return out
+
+
+def cohort_findings(cohort_df: pd.DataFrame) -> list[dict]:
+    """The cohort-level checks on their own, for any slice of the cohort.
+
+    A facility account sees these for its own facility (CDC session, 4 Nov 2026).
+    Two checks read columns only the upload has (ART start, session 2 and 3
+    dates), so on a cohort read back from the database they are left out rather
+    than reported as zero.
+    """
+    out: list[dict] = []
+
+    def add(sheet, name, sev, n, detail):
+        out.append({"sheet": sheet, "check_name": name,
+                    "severity": sev if n else "clear",
+                    "n_records": int(n), "detail": detail})
+
+    if len(cohort_df):
+        cohort_checks(cohort_df, add)
+    return out
+
+
+def cohort_checks(c: pd.DataFrame, add) -> None:
+    """Checks on the assembled cohort. `add(sheet, name, severity, n, detail)`."""
     add(None, "EAC session dated before the index VL", "high",
         int(c["eac_prior_cycle"].sum()),
         "Session 1 precedes the VL that should have triggered it. Excluded from the "
@@ -325,14 +350,15 @@ def dq_checks(sheets: dict[str, pd.DataFrame], infos: list[SheetInfo],
     # Guideline: the first VL is drawn after 6 months of consecutive ART. An
     # index VL earlier than that points at a date error or premature testing -
     # most relevant for newly commencing clients.
-    art0 = pd.to_datetime(c.get("art_start"), errors="coerce")
-    idxd = pd.to_datetime(c.get("idx_date"), errors="coerce")
-    early = ((idxd - art0).dt.days < 183) & art0.notna() & idxd.notna()
-    add(None, "Index VL within 6 months of ART start", "medium",
-        int(early.fillna(False).sum()),
-        "The guideline recommends the first VL after 6 months of consecutive ART. "
-        "An index VL earlier than that suggests a date error or premature sampling - "
-        "check ART start dates for newly commencing clients.")
+    if "art_start" in c:
+        art0 = pd.to_datetime(c["art_start"], errors="coerce")
+        idxd = pd.to_datetime(c.get("idx_date"), errors="coerce")
+        early = ((idxd - art0).dt.days < 183) & art0.notna() & idxd.notna()
+        add(None, "Index VL within 6 months of ART start", "medium",
+            int(early.fillna(False).sum()),
+            "The guideline recommends the first VL after 6 months of consecutive ART. "
+            "An index VL earlier than that suggests a date error or premature sampling - "
+            "check ART start dates for newly commencing clients.")
     # matches the `awaiting_vl` worklist: completed the course (sessions 1-3 +
     # >=30 days) but no post-EAC VL SAMPLE on/after session 3.
     add(None, "EAC completed, no post-EAC VL sample", "medium",
@@ -351,17 +377,18 @@ def dq_checks(sheets: dict[str, pd.DataFrame], infos: list[SheetInfo],
     # Session dates that contradict each other: S2 or S3 dated before S1, or S3
     # before S2. Surfaced because it is the only way an episode can be 'completed'
     # while its follow-up sample predates session 1.
-    s1d = pd.to_datetime(c.get("Session_1_Date"), errors="coerce")
-    s3d = pd.to_datetime(c.get("Session_3_Date"), errors="coerce")
-    s2d = pd.to_datetime(c.get("Session_2_Date"), errors="coerce")
-    disorder = (((s2d < s1d) & s2d.notna() & s1d.notna())
-                | ((s3d < s1d) & s3d.notna() & s1d.notna())
-                | ((s3d < s2d) & s3d.notna() & s2d.notna()))
-    add(None, "EAC session dates out of order", "high",
-        int(disorder.fillna(False).sum()),
-        "Session 2 or 3 is dated before session 1 (or session 3 before session 2). "
-        "The session series contradicts itself, so any lead time or completion "
-        "derived from it is unreliable. Fix at source.")
+    if {"Session_1_Date", "Session_2_Date", "Session_3_Date"} <= set(c.columns):
+        s1d = pd.to_datetime(c["Session_1_Date"], errors="coerce")
+        s3d = pd.to_datetime(c["Session_3_Date"], errors="coerce")
+        s2d = pd.to_datetime(c["Session_2_Date"], errors="coerce")
+        disorder = (((s2d < s1d) & s2d.notna() & s1d.notna())
+                    | ((s3d < s1d) & s3d.notna() & s1d.notna())
+                    | ((s3d < s2d) & s3d.notna() & s2d.notna()))
+        add(None, "EAC session dates out of order", "high",
+            int(disorder.fillna(False).sum()),
+            "Session 2 or 3 is dated before session 1 (or session 3 before session 2). "
+            "The session series contradicts itself, so any lead time or completion "
+            "derived from it is unreliable. Fix at source.")
     add(None, "Post-EAC result with no sample date", "medium",
         int((c["post_result"] & ~c["post_sample"]).sum()),
         "A follow-up VL result exists but Followup_VL_Sample_Collection_Date is blank. "
@@ -378,7 +405,6 @@ def dq_checks(sheets: dict[str, pd.DataFrame], infos: list[SheetInfo],
         f"{rep_clients} clients unsuppressed more than once ({int(len(c) - c['sn'].nunique())} "
         "repeat occurrences). Each episode is tracked separately - not duplicates - and these "
         "are the highest-priority switch candidates.")
-    return out
 
 
 def ingest_workbook(buf: bytes, as_of, mode: str = "snapshot", filename: str = ""):

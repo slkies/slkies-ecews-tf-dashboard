@@ -17,7 +17,7 @@ import pytest
 from conftest import ADMIN, hdr   # tests/ is not a package; pytest adds it to sys.path
 
 PROTECTED = ["/api/summary", "/api/overview", "/api/clients", "/api/export",
-             "/api/filters", "/api/dq", "/api/uploads", "/api/users",
+             "/api/filters", "/api/dq", "/api/dq/scoped", "/api/uploads", "/api/users",
              "/api/audit", "/api/cascade", "/api/plans"]
 
 ADMIN_ONLY = ["/api/users", "/api/audit", "/api/feedback"]
@@ -697,6 +697,24 @@ def test_worklist_counts_respect_scope(client, admin_h, cohort):
     h = _scoped_viewer(client, admin_h, "Delta")
     delta = {c["flag"]: c["n"] for c in client.get("/api/worklists", headers=h).json()}
     assert all(delta[k] <= everyone[k] for k in everyone if everyone[k] is not None)
+
+
+def test_scoped_findings_cover_only_the_accounts_rows(client, admin_h, cohort):
+    # A facility or state account's data-quality findings come from its own
+    # rows (CDC session, 4 Nov 2026), and are counts with no identifiers in them.
+    everyone = {f["check_name"]: f["n_records"]
+                for f in client.get("/api/dq/scoped", headers=admin_h).json()}
+    h = _scoped_viewer(client, admin_h, "Delta")
+    r = client.get("/api/dq/scoped", headers=h)
+    assert r.status_code == 200
+    delta = {f["check_name"]: f["n_records"] for f in r.json()}
+    assert delta and set(delta) == set(everyone)
+    assert all(delta[k] <= everyone[k] for k in delta)
+    assert all(set(f) == {"sheet", "check_name", "severity", "n_records", "detail"} for f in r.json())
+    # Asking for another state changes nothing: scope wins, as everywhere.
+    osun = {f["check_name"]: f["n_records"]
+            for f in client.get("/api/dq/scoped?state=Osun", headers=h).json()}
+    assert osun == delta
 
 
 def test_admin_can_export_only_the_selected_episodes(client, admin_h, cohort):

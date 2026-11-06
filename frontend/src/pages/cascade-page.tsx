@@ -73,7 +73,14 @@ const BASE = 12
 const TIER: Record<number, string> = { 11: '', 12: '1b', 61: '6a', 91: '', 92: '', 93: '9b' }
 const SUB = new Set([91, 92])
 
-export default function CascadePage({ onOpenWorklist }: { onOpenWorklist?: (flag: string) => void }) {
+/**
+ * `embedded` drops the page's own heading and filter bar, for a page that
+ * shows the cascade under filters of its own (Facility home).
+ */
+export default function CascadePage({ onOpenWorklist, embedded = false }: {
+  onOpenWorklist?: (flag: string) => void
+  embedded?: boolean
+}) {
   const { query, options } = useFilters()
   const [steps, setSteps] = useState<CascadeStep[] | null>(null)
   const [loading, setLoading] = useState(true)
@@ -99,6 +106,7 @@ export default function CascadePage({ onOpenWorklist }: { onOpenWorklist?: (flag
 
   return (
     <div className="flex flex-col gap-6">
+      {!embedded && <>
       <div className="flex flex-wrap items-end justify-between gap-4">
         <div className="flex flex-col gap-1">
           <h1 className="text-2xl font-bold tracking-tight text-balance">The treatment failure cascade</h1>
@@ -111,6 +119,7 @@ export default function CascadePage({ onOpenWorklist }: { onOpenWorklist?: (flag
       </div>
 
       <FilterBar />
+      </>}
 
       {err && <Alert variant="destructive"><AlertDescription>{err}</AlertDescription></Alert>}
 

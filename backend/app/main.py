@@ -33,7 +33,7 @@ from psycopg_pool import ConnectionPool
 from pydantic import BaseModel, Field
 
 from . import indicators as ind
-from .ingest import COHORT_COLS, cohort_records, ingest_workbook
+from .ingest import COHORT_COLS, cohort_findings, cohort_records, ingest_workbook
 from .version import build_info
 from .security import create_token, decode_token, hash_password, verify_password
 
@@ -1468,6 +1468,22 @@ def get_dq(u: U):
             "WHERE upload_id=%s ORDER BY CASE severity WHEN 'critical' THEN 0 "
             "WHEN 'high' THEN 1 WHEN 'medium' THEN 2 WHEN 'low' THEN 3 ELSE 4 END, "
             "n_records DESC", (uid,)).fetchall()
+
+
+_SEV = {"critical": 0, "high": 1, "medium": 2, "low": 3, "clear": 4}
+
+
+@app.get("/api/dq/scoped")
+def get_dq_scoped(u: U, f: F):
+    """The cohort checks recomputed on the account's own rows and filters.
+
+    /api/dq holds the findings stored at upload, for the whole programme. A
+    facility account needs its own facility's (CDC session, 4 Nov 2026), so
+    the cohort checks run again on exactly what `_load` lets it see. Counts
+    only: no row, key or identifier leaves this endpoint.
+    """
+    out = cohort_findings(_load(u, f))
+    return sorted(out, key=lambda r: (_SEV.get(r["severity"], 9), -r["n_records"]))
 
 
 @app.get("/api/overview")

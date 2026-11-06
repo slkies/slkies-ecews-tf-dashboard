@@ -147,7 +147,11 @@ export function PinFiltersToggle() {
   )
 }
 
-export default function FilterBar() {
+/**
+ * `fields` limits the bar to some filters. A facility account has no use for
+ * state, LGA of service or facility: its rows are one facility already.
+ */
+export default function FilterBar({ fields }: { fields?: FilterKey[] } = {}) {
   const { options, error, selection, get, set, reset, active } = useFilters()
 
   if (error) {
@@ -161,17 +165,19 @@ export default function FilterBar() {
   }
   if (!options) return null
 
-  return <Bar options={options} selection={selection} get={get} set={set} reset={reset} active={active} />
+  return <Bar options={options} selection={selection} get={get} set={set} reset={reset} active={active} fields={fields} />
 }
 
-function Bar({ options, selection, get, set, reset, active }: {
+function Bar({ options, selection, get, set, reset, active, fields }: {
   options: FilterOptions
   selection: ReturnType<typeof useFilters>['selection']
   get: (k: FilterKey) => string[]
   set: (k: FilterKey, v: string[]) => void
   reset: () => void
   active: number
+  fields?: FilterKey[]
 }) {
+  const shownFields = fields ? FIELDS.filter((f) => fields.includes(f.key)) : FIELDS
   const avail = visibleOptions(options, selection)
   const [pinned] = usePinnedFilters()
 
@@ -231,7 +237,7 @@ function Bar({ options, selection, get, set, reset, active }: {
     <Card size="sm">
       <CardContent className="flex flex-col gap-3">
         <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
-          {FIELDS.map(controlFor)}
+          {shownFields.map(controlFor)}
         </div>
         {active > 0 && (
           <div className="flex flex-wrap items-center gap-1.5 border-t pt-3">
