@@ -1,6 +1,7 @@
 import { KeyRound, LogOut, MessageSquare, Moon, Sun } from 'lucide-react'
 import { useState } from 'react'
 import { ChangePasswordDialog, FeedbackDialog } from '@/components/account-dialogs'
+import { DataAgeLine } from '@/components/data-age'
 import { DataNotices } from '@/components/data-notices'
 import { Avatar, AvatarFallback } from '@/components/ui/avatar'
 import { Button } from '@/components/ui/button'
@@ -40,6 +41,7 @@ export function SiteHeader({ title, onOpenDq }: { title: string; onOpenDq?: () =
       </div>
 
       <div className="ml-auto flex items-center gap-1">
+        <DataAgeLine />
         <DataNotices onOpenDq={onOpenDq} />
         <Button variant="ghost" size="icon" onClick={toggle}
                 aria-label={theme === 'dark' ? 'Switch to light theme' : 'Switch to dark theme'}>
