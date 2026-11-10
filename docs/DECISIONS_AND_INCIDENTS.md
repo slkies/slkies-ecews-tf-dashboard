@@ -515,3 +515,48 @@ One conclusion moves: male sex, 0.79 (0.64–0.98) treated as independent, is 0.
 The univariate odds ratios beside them are crude 2 × 2 figures and are not adjusted
 for this. The checks card names any factor whose reading would differ without
 clustering, so the comparison stays visible.
+
+## 27. A client who re-suppressed on a later cycle leaves the DTC lists
+**10 Nov 2026** — A client's first cycle ended at 1,970, a second cycle brought them
+to 19, and they were still listed for DTC review (Es). The lists judged each episode
+on its own follow-up VL, so the first episode stayed *awaiting DTC review* whatever
+happened afterwards.
+
+An episode is now *re-suppressed since* when a later episode of the same client
+re-suppressed. Such an episode still counts as still at or above 1,000 in the
+cascade, because that is what its own follow-up showed. It leaves the lists that ask
+someone to act: awaiting DTC review, prior switch, more than 2 cycles, and the
+trajectory table on DTC review. Its plan reads D, not F. Wherever the
+still-unsuppressed group is split it is its own group, so awaiting + prior switch +
+switched + EAC not completed + re-suppressed since = still at or above 1,000. An
+episode that was switched and later re-suppressed stays under switched. A client
+whose later cycle also fails stays on the lists.
+
+On the 31 Oct line list: still at or above 1,000 is unchanged at 557; awaiting DTC
+review 181 to 171; prior switch 33 to 25; EAC not completed 315 to 253; re-suppressed
+since 80; trajectory rows 557 to 469; plan F 195 to 181. The flag is worked out when
+a line list is loaded, so a list loaded before this date keeps its old figures.
+
+The same client's episodes were also numbered the wrong way round on the client
+record. Episodes were ordered by the received date alone, and both carried the same
+one. They are now ordered by result date, then sample date, then received date.
+
+**Dates that disagree on the register (not changed, recorded).** 222 of 4,893
+episodes have a received date earlier than the sample date. They are two different
+faults:
+
+- 189: result date, then received a median 18 days later, then the sample date
+  later still. The result and received dates agree with each other; the sample date
+  is a later repeat sample, taken before the register row was written (157 are
+  FY25Q4, the first register). The quarter is right. The "index sample collected"
+  shown for the episode is not.
+- 33: received a median 307 days before the result date. The received date is an
+  earlier result's, left in the EMR when the new result was entered. This is the
+  existing data-quality check *Result received before it was resulted*. 23 of the 33
+  would fall in a different quarter if dated by the result.
+
+Not changed, and open: the Overview switch rate still counts the 80 as eligible and
+not switched; *Unsuppressed for more than 6 months* counts from the index date
+whether or not the episode re-suppressed; and the follow-up VL is linked in sample
+order while EAC cycles are matched in result-date order (6 clients' episodes sort
+differently under the two, and 66 have two episodes sharing one sample date).

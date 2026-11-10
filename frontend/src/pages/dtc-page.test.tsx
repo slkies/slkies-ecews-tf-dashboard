@@ -65,6 +65,15 @@ describe('DTC review page', () => {
     expect(screen.getByText(/8 of 14/)).toBeInTheDocument()
   })
 
+  it('counts clients who re-suppressed on a later cycle apart from the review backlog', async () => {
+    mock({ ...DTC, summary: { ...DTC.summary, resolved: 37 } })
+    draw()
+    await ready()
+    const tile = screen.getByText('on a later cycle, without a switch').parentElement!
+    expect(within(tile).getByText('Re-suppressed since')).toBeInTheDocument()
+    expect(within(tile).getByText('37')).toBeInTheDocument()
+  })
+
   it('shortens viral loads the way clinicians read them', () => {
     expect(vlShort(412000)).toBe('412k')
     expect(vlShort(1_200_000)).toBe('1.2M')

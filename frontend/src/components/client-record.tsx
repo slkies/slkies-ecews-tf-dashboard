@@ -37,6 +37,8 @@ export interface Episode {
   fu_samp: string | null; fu_date: string | null; fu_vl: number | null
   awaiting_result: boolean | null; resuppressed: boolean | null; llv: boolean | null
   still_unsuppressed: boolean | null; switched: boolean | null
+  /** Still at or above 1,000 here, but a later episode of this client re-suppressed. */
+  resupp_later?: boolean | null
   months_unsuppressed: number | null; treatment_plan: string | null
   worklists: string[]
 }
@@ -318,6 +320,7 @@ function EpisodeCard({ e, n, wide = false, nextVisit = null }: {
       </dl>
       <div className="flex flex-wrap items-center gap-2 text-sm">
         {outcome(e)}
+        {e.resupp_later && <StatusBadge tone="good">Re-suppressed on a later cycle</StatusBadge>}
         {e.switched && <StatusBadge tone="good">Switched regimen</StatusBadge>}
         {e.vl_at_next_visit && <StatusBadge tone="warn">VL expected at the next scheduled visit</StatusBadge>}
       </div>

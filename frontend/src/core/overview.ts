@@ -83,6 +83,8 @@ export interface Overview {
   switch_eligible: number
   switched: number
   prior_switch: number
+  /** Still at or above 1,000 on the episode, re-suppressed on a later one, not switched. */
+  resolved_later?: number
   switch_pct: number | null
   awaiting_switch: number
   repeat_failure: number

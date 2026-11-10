@@ -405,7 +405,7 @@ def _load(u: dict, f: Filters, upload_id: int | None = None) -> pd.DataFrame:
               "dtc_review", "paed",
               # worklist flags read straight from the cohort; missing from this
               # list, a NULL in any of them made that worklist fail outright
-              "post_eac_vl", "awaiting_switch", "prior_switch",
+              "post_eac_vl", "awaiting_switch", "prior_switch", "resupp_later",
               "eac_trunc_pre", "eac_trunc_mid", "vl_at_next_visit"):
         if b in df:
             df[b] = df[b].fillna(False).astype(bool)
@@ -785,8 +785,8 @@ _RECORD_EPISODE = ["episode", "idx_vl", "idx_samp", "recv_date", "idx_date",
                    "eac1", "eac2", "eac3", "eac_extended", "vl_at_next_visit", "eac_cycle_no",
                    "eac_completed", "sessions", "post_eac_vl", "fu_samp", "fu_date",
                    "fu_vl", "awaiting_result", "resuppressed", "llv",
-                   "still_unsuppressed", "switched", "months_unsuppressed",
-                   "treatment_plan"]
+                   "still_unsuppressed", "switched", "resupp_later",
+                   "months_unsuppressed", "treatment_plan"]
 
 
 @app.get("/api/client-search")
@@ -837,9 +837,13 @@ def client_search(u: U, request: Request,
     if df.empty:
         rows, n = [], 0
     else:
+        # Ties on the received date go to the later result, so the row shown
+        # for a client is their newest episode (see client_record below).
         df = df.assign(_recv=pd.to_datetime(df["recv_date"].fillna(df["idx_date"]),
-                                            errors="coerce"))
-        latest = df.sort_values("_recv", ascending=False).drop_duplicates("sn")
+                                            errors="coerce"),
+                       _idx=pd.to_datetime(df["idx_date"], errors="coerce"))
+        latest = (df.sort_values(["_recv", "_idx"], ascending=False, kind="mergesort")
+                    .drop_duplicates("sn"))
         latest = latest.assign(episodes=latest["sn"].map(df["sn"].value_counts()))
         n = len(latest)
         rows = _json_safe(latest[["sn", "facility", "state", "sex", "age", "art_status",
@@ -865,8 +869,19 @@ def client_record(sn: str, u: U, request: Request):
     df = df[df["sn"].astype("string").eq(sn)] if not df.empty else df
     if df.empty:
         raise HTTPException(404, "No client with that S/N in your area.")
-    df = df.assign(_recv=pd.to_datetime(df["recv_date"].fillna(df["idx_date"]),
-                                        errors="coerce")).sort_values("_recv", ascending=False)
+    # Newest first by the RESULT date, then the sample, then the received date.
+    # It was the received date alone, and two episodes carrying the same
+    # received date (the EMR leaves the old one in place when a new result is
+    # typed over it) came out in either order - a client's second episode was
+    # shown as "Episode 1" (Es, 10 Nov 2026). The result date leads because it
+    # is the one that stays with its result: on 189 register rows the sample
+    # date belongs to a later repeat sample, and on 33 the received date is an
+    # earlier result's (decision 27).
+    def _d(col):
+        return pd.to_datetime(df[col], errors="coerce") if col in df else pd.NaT
+    df = (df.assign(_idx=_d("idx_date"), _samp=_d("idx_samp"), _recv=_d("recv_date"))
+            .assign(_idx=lambda x: x["_idx"].fillna(x["_samp"]).fillna(x["_recv"]))
+            .sort_values(["_idx", "_samp", "_recv"], ascending=False, kind="mergesort"))
     eps = _json_safe(df[[c for c in _RECORD_EPISODE if c in df.columns]])
     for e, (_, row) in zip(eps, df.iterrows()):
         one = df.loc[[row.name]]
@@ -1725,6 +1740,12 @@ def overview(u: U, f: F):
         "switch_eligible": len(sw_elig),
         "switched": switched,
         "prior_switch": prior_sw,
+        # Still >= 1,000 on the episode, re-suppressed on a later one, never
+        # switched: off the DTC lists, and counted so the groups still add up.
+        "resolved_later": int((df["still_unsuppressed"].fillna(False).astype(bool)
+                               & df.get("resupp_later", pd.Series(False, index=df.index))
+                                   .fillna(False).astype(bool)
+                               & ~df["switched"].fillna(False).astype(bool)).sum()),
         "switch_pct": rate(switched, len(sw_elig)),
         "awaiting_switch": int(df["awaiting_switch"].fillna(False).astype(bool).sum()),
         "repeat_failure": repeats_fail,

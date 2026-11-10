@@ -8,7 +8,8 @@ import pandas as pd
 import pytest
 
 from app.indicators import (build_cohort, canonical_lga_res, cascade, dtc_review,
-                            fiscal_quarter, fiscal_year, norm_state, vl_category)
+                            fiscal_quarter, fiscal_year, norm_state, vl_category,
+                            vl_trajectory)
 from app.ingest import audit_censoring
 
 AS_OF = pd.Timestamp("2026-07-11")
@@ -289,7 +290,8 @@ def test_dtc_repeat_subset_nests_in_still():
     assert s["repeat_still_episodes"] <= s["still"]
     assert s["repeat_still_episodes"] <= s["repeat_episodes"]
     assert s["repeat_still_clients"] <= s["repeat_clients"]
-    assert s["awaiting"] + s["prior"] + s["switched"] + s["not_completed"] == s["still"]
+    assert (s["awaiting"] + s["prior"] + s["switched"] + s["not_completed"]
+            + s["resolved"]) == s["still"]
 
 
 # ── small helpers ─────────────────────────────────────────────────────
@@ -920,3 +922,50 @@ def test_cohort_findings_run_on_a_cohort_read_back_from_the_database():
     assert slim == {k: v for k, v in full.items() if k in slim}
     assert set(full) - set(slim) <= {"Index VL within 6 months of ART start", "EAC session dates out of order"}
     assert cohort_findings(df.iloc[0:0]) == []
+
+
+# ── re-suppressed on a later cycle (Es, 10 Nov 2026) ──────────────────
+def _second_cycle(fu_vl):
+    """The reported client: 15,800 in January, EAC, 1,970 in May (so a second
+    episode), a second cycle, then the follow-up given. The May result carries
+    the January result's received date, as the EMR left it."""
+    sn = "0.777777777777"
+    tu = pd.DataFrame([
+        {"S/N": sn, "currentViralLoad": 15800, "dateofCurrentViralLoad": "2026-01-23",
+         "lastDateOfSampleCollection": "2026-01-23", "dateResultReceivedFacility": "2026-02-13"},
+        {"S/N": sn, "currentViralLoad": 1970, "dateofCurrentViralLoad": "2026-05-08",
+         "lastDateOfSampleCollection": "2026-05-08", "dateResultReceivedFacility": "2026-02-13"},
+    ])
+    eac = pd.DataFrame([
+        mk(**{"S/N": sn}, Session_1_Date="2026-05-20", Session_2_Date="2026-06-18",
+           Session_3_Date="2026-07-16"),
+        mk(**{"S/N": sn}, Session_1_Date="2026-02-16", Session_2_Date="2026-03-10",
+           Session_3_Date="2026-04-14"),
+    ])
+    c = build_cohort(tu, treat(sn=sn, fu_vl=fu_vl, fu_samp="2026-09-09"), eac,
+                     as_of=pd.Timestamp("2026-10-31"), mode="snapshot")
+    return c.df.sort_values("idx_samp").reset_index(drop=True)
+
+
+def test_a_client_who_re_suppressed_on_a_later_cycle_leaves_the_dtc_lists():
+    d = _second_cycle(fu_vl=19)
+    first, second = d.loc[0], d.loc[1]
+    # the first episode is still what it was: 1,970 after a completed cycle
+    assert bool(first["still_unsuppressed"]) and first["fu_vl"] == 1970
+    assert bool(second["resuppressed"]) and second["fu_vl"] == 19
+    # ...but nobody is asked to act on it
+    assert bool(first["resupp_later"]) and not bool(second["resupp_later"])
+    assert not bool(first["awaiting_switch"]) and not bool(first["dtc_review"])
+    assert first["treatment_plan"].startswith("D.")
+    s = dtc_review(d)["summary"]
+    assert s["still"] == 1 and s["awaiting"] == 0 and s["resolved"] == 1
+    assert s["not_completed"] == 0 and s["repeat_still_clients"] == 0
+    assert vl_trajectory(d)["n"] == 0
+
+
+def test_a_second_cycle_that_also_fails_keeps_the_client_on_the_dtc_list():
+    d = _second_cycle(fu_vl=4200)
+    assert not d["resupp_later"].any()
+    assert d["awaiting_switch"].tolist() == [True, True]
+    assert dtc_review(d)["summary"]["resolved"] == 0
+    assert vl_trajectory(d)["n"] == 2

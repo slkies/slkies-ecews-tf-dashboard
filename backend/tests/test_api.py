@@ -893,6 +893,33 @@ def test_client_record_lists_episodes_and_their_worklists(client, admin_h, cohor
     assert ep["idx_vl"] == 5000 and isinstance(ep["worklists"], list)
 
 
+def test_client_record_orders_episodes_by_result_date_when_received_dates_tie(client, admin_h, cohort):
+    """Two episodes carrying the same received date (the EMR left the old one in
+    place): the later RESULT is the newer episode, whatever order they load in."""
+    from app.main import pool
+    with pool.connection() as c:
+        for vl, samp in ((1970, "2026-05-08"), (15800, "2026-01-23")):
+            c.execute(
+                "INSERT INTO cohort (upload_id,sn,episode,state,lga,facility,"
+                "sex,age,age_band,art_status,idx_vl,idx_date,idx_samp,recv_date,fy_quarter,"
+                "enrol_quarter,fy,eac1,post_result,resuppressed) VALUES "
+                "(%s,'0.800000000002',%s,'Delta','Warri','Clinic A',"
+                "'Female',35,'35-44','Active',%s,%s,%s,'2026-02-13','FY26Q2','FY26Q2','FY26',"
+                "TRUE,TRUE,FALSE)", (cohort, f"0.800000000002|{samp}", vl, samp, samp))
+        # and the same pair entered the other way round, for a second client
+        for vl, samp in ((15800, "2026-01-23"), (1970, "2026-05-08")):
+            c.execute(
+                "INSERT INTO cohort (upload_id,sn,episode,state,lga,facility,"
+                "sex,age,age_band,art_status,idx_vl,idx_date,idx_samp,recv_date,fy_quarter,"
+                "enrol_quarter,fy,eac1,post_result,resuppressed) VALUES "
+                "(%s,'0.800000000003',%s,'Delta','Warri','Clinic A',"
+                "'Female',35,'35-44','Active',%s,%s,%s,'2026-02-13','FY26Q2','FY26Q2','FY26',"
+                "TRUE,TRUE,FALSE)", (cohort, f"0.800000000003|{samp}", vl, samp, samp))
+    for sn in ("0.800000000002", "0.800000000003"):
+        eps = client.get(f"/api/client/{sn}", headers=admin_h).json()["episodes"]
+        assert [e["idx_vl"] for e in eps] == [1970, 15800], "newest result first"
+
+
 def test_client_lookups_are_audited(client, admin_h, cohort):
     client.get("/api/client-search?q=000003", headers=admin_h)
     client.get("/api/client/0.100000000003", headers=admin_h)

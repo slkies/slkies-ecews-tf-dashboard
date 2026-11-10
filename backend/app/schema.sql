@@ -170,6 +170,10 @@ ALTER TABLE cohort ADD COLUMN IF NOT EXISTS next_visit       DATE;
 ALTER TABLE cohort ADD COLUMN IF NOT EXISTS vl_at_next_visit BOOLEAN;
 -- the client's cycle number, counted from their own episodes (30 Oct 2026)
 ALTER TABLE cohort ADD COLUMN IF NOT EXISTS eac_cycle_no     INTEGER;
+-- 10 Nov 2026: still >= 1,000 on this episode, but a later episode of the same
+-- client re-suppressed. Takes the episode off the DTC lists. NULL on line
+-- lists loaded before this date, which reads as "no".
+ALTER TABLE cohort ADD COLUMN IF NOT EXISTS resupp_later     BOOLEAN;
 
 CREATE INDEX IF NOT EXISTS cohort_lga_res ON cohort(upload_id, lga_res_norm);
 

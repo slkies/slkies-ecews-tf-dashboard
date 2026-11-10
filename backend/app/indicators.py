@@ -810,6 +810,21 @@ def build_cohort(
     df["still_unsuppressed"] = df["post_result"] & (df["fu_vl"] >= VL_FAIL)
     df["repeat_failure"] = take_nxt & (nxt_vl >= VL_FAIL)
 
+    # ── RE-SUPPRESSED SINCE (Es, 10 Nov 2026) ─────────────────────────────
+    # An episode stays "still unsuppressed" for good: that is what its own
+    # follow-up VL said, and the cascade counts it. But the lists that ask
+    # someone to ACT on it must look at the client as they are now. A client
+    # whose first cycle ended at 1,970, who went through a second cycle and
+    # came back at 19, was still listed for DTC review on the first episode -
+    # the committee would have been asked to switch a suppressed client.
+    #
+    # So: an episode is "re-suppressed since" when a LATER episode of the same
+    # client re-suppressed. The frame is in client and sample order here (the
+    # sort above), which is the order the follow-up itself is read in.
+    _rs = df["resuppressed"].fillna(False).astype(bool).astype(int)
+    _from_here = _rs.iloc[::-1].groupby(df["sn"].iloc[::-1]).cumsum()
+    df["resupp_later"] = ((_from_here.reindex(df.index) - _rs) > 0).astype(bool)
+
     # ── SWITCHING (team review, 19 Jul 2026) ──────────────────────────────
     # A genuine switch requires the regimen at the INDEX unsuppressed VL to have
     # been first-line, and the client to be on 2nd/3rd line in a later treatment
@@ -826,15 +841,18 @@ def build_cohort(
                       pd.Series(pd.NA, index=df.index)).astype("string").str.lower())
     df["idx_on_2nd"] = idxline.str.contains(_2ND, regex=True, na=False)  # NA -> False (assume 1st)
     su = df["still_unsuppressed"]
+    # Open = nothing since has closed the question. A client who has since
+    # re-suppressed is not waiting for the committee (see resupp_later above).
+    open_ = ~df["resupp_later"]
     df["switch_eligible"] = (su & ~df["idx_on_2nd"]).fillna(False).astype(bool)
     df["switched"] = (su & ~df["idx_on_2nd"] & df["on_second_line"]).fillna(False).astype(bool)
-    df["prior_switch"] = (su & df["idx_on_2nd"]).fillna(False).astype(bool)
+    df["prior_switch"] = (su & df["idx_on_2nd"] & open_).fillna(False).astype(bool)
     # Awaiting DTC review also requires COMPLETED EAC (decision 24): the list is
     # "still unsuppressed after EAC", and a client who never finished EAC needs
     # the EAC, not the committee. Those are on the EAC lists already, and are
     # counted below as "EAC not completed" so the four groups add up.
     df["awaiting_switch"] = (su & ~df["idx_on_2nd"] & ~df["on_second_line"]
-                             & df["eac_completed"]).fillna(False).astype(bool)
+                             & df["eac_completed"] & open_).fillna(False).astype(bool)
 
     samp = df["fu_samp"]
     res = df["fu_samp"]      # sample date is the clock for post-EAC timing
@@ -882,7 +900,8 @@ def build_cohort(
     eac1 = df["eac1"].fillna(False).astype(bool)
     cum = eac1.loc[order].astype(int).groupby(df.loc[order, "sn"]).cumsum()
     df["eac_cycle_no"] = cum.reindex(df.index).where(eac1)
-    df["dtc_review"] = ((df["eac_cycle_no"] > 2) & ~df["resuppressed"].astype(bool)).fillna(False).astype(bool)
+    df["dtc_review"] = ((df["eac_cycle_no"] > 2) & ~df["resuppressed"].astype(bool)
+                        & ~df["resupp_later"]).fillna(False).astype(bool)
 
     # --- §5: time-dependent ---------------------------------------------
     # A negative interval here means the sample predates session 1 - that cycle
@@ -946,6 +965,10 @@ def _plan(r: pd.Series, as_of: pd.Timestamp) -> str:
     has_result = bool(r.get("post_result"))
     fu = r.get("fu_vl")
 
+    # Re-suppressed on a later episode: the plan is the suppressed client's
+    # plan, whatever this episode's own follow-up read (Es, 10 Nov 2026).
+    if bool(r.get("resupp_later")):
+        return "D. Repeat VL in 6 months, continue adherence counselling"
     if has_result and pd.notna(fu) and fu >= VL_FAIL and bool(r.get("eac_completed")):
         return "F. Refer to Drug Therapeutic Committee, update register and EMR"
     if has_result and pd.notna(fu) and fu < VL_FAIL:
@@ -2178,12 +2201,18 @@ def dtc_review(df: pd.DataFrame) -> dict:
     # re-suppress and so are not switch candidates at all. The univariate OR
     # analysis below deliberately stays on ALL repeats (`rep`) as a broader
     # descriptive signal - only this headline is the subset.
-    rep_still = rep & still
     switched = df["switched"].fillna(False).astype(bool)
     awaiting = df["awaiting_switch"].fillna(False).astype(bool)
     prior = df.get("prior_switch", pd.Series(False, index=df.index)).fillna(False).astype(bool)
+    # Still >= 1,000 on this episode's follow-up, but the client re-suppressed
+    # on a later episode without a switch: no longer a case for the committee
+    # (Es, 10 Nov 2026). A line list loaded before that date has no such
+    # column, and reads as none.
+    since = df.get("resupp_later", pd.Series(False, index=df.index)).fillna(False).astype(bool)
+    resolved = still & since & ~switched
+    rep_still = rep & still & ~since
     # still >= 1,000, 1st line, not switched, EAC not completed (decision 24)
-    not_done = still & ~awaiting & ~prior & ~switched
+    not_done = still & ~awaiting & ~prior & ~switched & ~resolved
 
     # Outcome of a completed cycle by which cycle it was for the client: a
     # second cycle re-suppresses far less often than a first (Es, 30 Oct 2026).
@@ -2208,7 +2237,8 @@ def dtc_review(df: pd.DataFrame) -> dict:
                       "2nd/3rd line", "1st line"),
         _cd4=_col(df, "cd4_band"),
         _vl=_col(df, "vl_magnitude"),
-        _still=still, _await=awaiting, _switched=switched, _prior=prior, _notdone=not_done)
+        _still=still, _await=awaiting, _switched=switched, _prior=prior, _notdone=not_done,
+        _resolved=resolved)
 
     def rate(a, b):
         return round(a / b * 100, 1) if b else None
@@ -2248,8 +2278,10 @@ def dtc_review(df: pd.DataFrame) -> dict:
             sw = int(g.loc[m, "_switched"].sum())
             pr = int(g.loc[m, "_prior"].sum())
             nd = int(g.loc[m, "_notdone"].sum())
+            rv = int(g.loc[m, "_resolved"].sum())
             out.append({"level": lv, "still": ns, "awaiting": aw, "switched": sw,
-                        "prior": pr, "not_completed": nd, "pct_awaiting": rate(aw, ns)})
+                        "prior": pr, "not_completed": nd, "resolved": rv,
+                        "pct_awaiting": rate(aw, ns)})
         return out
 
     mu = pd.to_numeric(d["months_unsuppressed"], errors="coerce")
@@ -2276,6 +2308,7 @@ def dtc_review(df: pd.DataFrame) -> dict:
             "awaiting": int(awaiting.sum()),
             "prior": int(prior.sum()),
             "not_completed": int(not_done.sum()),
+            "resolved": int(resolved.sum()),
             "dtc_flag": int(dtc.sum()),
         },
         "by_cycle": by_cycle,
@@ -2285,6 +2318,7 @@ def dtc_review(df: pd.DataFrame) -> dict:
             "n_still": int(still.sum()), "awaiting": int(awaiting.sum()),
             "switched": int(switched.sum()), "prior": int(prior.sum()),
             "not_completed": int(not_done.sum()),
+            "resolved": int(resolved.sum()),
             "by_state": gap_by("state", states),
             "by_regimen": gap_by("_reg", ["1st line", "2nd/3rd line"]),
             "by_months": gap_by("_mub", ["<3 mo", "3-6 mo", "6-12 mo", "12+ mo"]),
@@ -2551,7 +2585,11 @@ def vl_trajectory(df: pd.DataFrame, limit: int = 500) -> dict:
     if df.empty or "still_unsuppressed" not in df.columns:
         return {"ok": False, "rows": [], "n": 0}
 
-    d = df[df["still_unsuppressed"].fillna(False).astype(bool)].copy()
+    # ...and has not since re-suppressed on a later episode: that client does
+    # not need a decision, and listing them here asks the committee to review
+    # someone whose latest result is suppressed (Es, 10 Nov 2026).
+    since = df.get("resupp_later", pd.Series(False, index=df.index)).fillna(False).astype(bool)
+    d = df[df["still_unsuppressed"].fillna(False).astype(bool) & ~since].copy()
     if d.empty:
         return {"ok": False, "rows": [], "n": 0}
 

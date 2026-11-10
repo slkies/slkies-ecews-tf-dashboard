@@ -69,7 +69,7 @@ docker compose up -d --build        # http://localhost:8080 (compose maps 8080 -
     -e TEST_DATABASE_URL="postgresql://<user>:<password>@db:5432/ecews_test" \
     -v "$(pwd)/backend:/work" -w /work ecews_tf_monitor-api pytest -q
   ```
-  **225 passing** (6 Nov 2026).
+  **228 passing** (10 Nov 2026).
 - **Frontend tests:** `cd frontend && npx vitest run` — **174 passing**. Type check:
   `npx tsc --noEmit`. On a busy machine a few tests can run past the 1-second wait
   for a page to appear; each passes when its file is run on its own.
@@ -216,7 +216,7 @@ client: standard errors widen by up to 1.20 times, and male sex reads 0.79
 ```
 ├── PROJECT_STATUS.md                 ← this file
 ├── EAC_Indicator_Definitions_and_Data_Analysis_Plan_v3_1.md   ← the spec
-├── docs/DECISIONS_AND_INCIDENTS.md   ← standing rules, decisions 1–26
+├── docs/DECISIONS_AND_INCIDENTS.md   ← standing rules, decisions 1–27
 ├── TECHNICAL_DOSSIER.md              ← architecture, data flow and security, for IT review
 ├── docs/RUNBOOK_pipeline.md          ← the weekly de-identification routine
 ├── docker-compose.yml, .env.example, DEPLOY.md

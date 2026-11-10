@@ -28,14 +28,14 @@ const NOT_DONE = 'color-mix(in oklch, var(--muted-foreground) 45%, transparent)'
 
 /* ─────────────────────────────────── types ─────────────────────────────────── */
 
-interface GapRow { level: string; still: number; awaiting: number; switched: number; prior: number; not_completed?: number; pct_awaiting: number | null }
+interface GapRow { level: string; still: number; awaiting: number; switched: number; prior: number; not_completed?: number; resolved?: number; pct_awaiting: number | null }
 interface OrLevel { level: string; n: number; repeat: number; pct: number | null; ref: boolean
   or_: number | null; or_lo: number | null; or_hi: number | null; or_p: number | null }
 
 export interface Dtc {
   ok: boolean
   summary: { repeat_clients: number; repeat_still_clients: number; repeat_still_episodes: number
-    still: number; switched: number; awaiting: number; prior: number; not_completed?: number; dtc_flag: number }
+    still: number; switched: number; awaiting: number; prior: number; not_completed?: number; resolved?: number; dtc_flag: number }
   /** Re-suppression after a completed cycle, by the client's cycle number. */
   by_cycle?: CycleOutcome[]
   repeat_assoc: { n: number; pct: number | null; variables: { label: string; levels: OrLevel[] }[] }
@@ -359,18 +359,19 @@ export default function DtcPage({ onOpenWorklist }: { onOpenWorklist?: (flag: st
     <div className={cn('flex flex-col gap-8 transition-opacity', loading && 'opacity-60')} aria-busy={loading}>
       {head}
 
-      <div className="grid gap-4 md:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-7">
+      <div className="grid gap-4 md:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-8">
         <Stat label="Still at or above 1,000" value={fmt(s.still)} note="after the follow-up VL" tone="warn" />
         <Stat label="Of whom failed more than once" value={fmt(s.repeat_still_clients)} note={`clients, a subset of the ${fmt(s.still)}`} />
         <Stat label="Awaiting DTC review" value={fmt(s.awaiting)} note="completed EAC, 1st line at index, still 1st" tone="bad" />
         <Stat label="EAC not completed" value={fmt(s.not_completed)} note="still 1st line; needs EAC first" tone="warn" />
         <Stat label="Prior switch" value={fmt(s.prior)} note="already 2nd/3rd line at index" tone="warn" />
         <Stat label="Switched" value={fmt(s.switched)} note="1st at index, now 2nd/3rd" />
+        <Stat label="Re-suppressed since" value={fmt(s.resolved ?? 0)} note="on a later cycle, without a switch" tone="good" />
         <Stat label="More than 2 cycles" value={fmt(s.dtc_flag)} note="still failing" tone={s.dtc_flag ? 'warn' : 'good'} />
       </div>
 
       <Section eyebrow="Switch gap" title="Still unsuppressed after EAC - the DTC pathway"
-               description="Every episode still at or above 1,000, split by the regimen line at the index VL. Awaiting review is the true switch backlog. Prior switch means already on 2nd or 3rd line, so the need is a drug-history and VL review, not another switch. The export has no switch date, so this shows who is waiting and where, not why.">
+               description="Every episode still at or above 1,000, split by the regimen line at the index VL. Awaiting review is the true switch backlog. Prior switch means already on 2nd or 3rd line, so the need is a drug-history and VL review, not another switch. Re-suppressed since means a later cycle brought the client below 1,000 without a switch, so they are no longer listed for review. The export has no switch date, so this shows who is waiting and where, not why.">
         <div className="grid gap-4 xl:grid-cols-[minmax(0,2fr)_minmax(0,3fr)]">
           <Card className="min-w-0">
             <CardHeader>
@@ -383,6 +384,7 @@ export default function DtcPage({ onOpenWorklist }: { onOpenWorklist?: (flag: st
                 <Swatch color="var(--warn)" label="Prior switch" />
                 <Swatch color="var(--primary)" label="Switched" />
                 <Swatch color={NOT_DONE} label="EAC not completed" />
+                <Swatch color="var(--good)" label="Re-suppressed since" />
               </div>
               <ul className="flex flex-col gap-3" aria-label="Switch gap by state">
                 {gap.by_state.map((r) => {
@@ -399,7 +401,7 @@ export default function DtcPage({ onOpenWorklist }: { onOpenWorklist?: (flag: st
                           <span className="text-muted-foreground"> awaiting of {fmt(r.still)}</span></span>
                       </div>
                       <div className="flex h-[18px] w-full overflow-hidden rounded-[5px] bg-muted" aria-hidden>
-                        {seg(r.awaiting, 'var(--bad)')}{seg(r.prior, 'var(--warn)')}{seg(r.switched, 'var(--primary)')}{seg(r.not_completed ?? 0, NOT_DONE, true)}
+                        {seg(r.awaiting, 'var(--bad)')}{seg(r.prior, 'var(--warn)')}{seg(r.switched, 'var(--primary)')}{seg(r.not_completed ?? 0, NOT_DONE)}{seg(r.resolved ?? 0, 'var(--good)', true)}
                       </div>
                     </li>
                   )
@@ -420,6 +422,7 @@ export default function DtcPage({ onOpenWorklist }: { onOpenWorklist?: (flag: st
                       <TableHead className="text-right">Prior switch</TableHead>
                       <TableHead className="text-right">Switched</TableHead>
                       <TableHead className="text-right">EAC not completed</TableHead>
+                      <TableHead className="text-right">Re-suppressed since</TableHead>
                       <TableHead className="text-right">% awaiting</TableHead>
                     </TableRow>
                   </TableHeader>
@@ -428,7 +431,7 @@ export default function DtcPage({ onOpenWorklist }: { onOpenWorklist?: (flag: st
                        ['By baseline CD4', gap.by_cd4]] as const).map(([title, rows]) => (
                       <Fragment key={title}>
                         <TableRow className="bg-muted/30 hover:bg-muted/30">
-                          <TableCell colSpan={7} className="font-medium text-muted-foreground">{title}</TableCell>
+                          <TableCell colSpan={8} className="font-medium text-muted-foreground">{title}</TableCell>
                         </TableRow>
                         {rows.map((r) => (
                           <TableRow key={`${title}${r.level}`}>
@@ -438,6 +441,7 @@ export default function DtcPage({ onOpenWorklist }: { onOpenWorklist?: (flag: st
                             <TableCell className="text-right tabular-nums">{fmt(r.prior)}</TableCell>
                             <TableCell className="text-right tabular-nums">{fmt(r.switched)}</TableCell>
                             <TableCell className="text-right tabular-nums">{fmt(r.not_completed)}</TableCell>
+                            <TableCell className="text-right tabular-nums">{fmt(r.resolved ?? 0)}</TableCell>
                             <TableCell className="text-right tabular-nums">{pc(r.pct_awaiting)}</TableCell>
                           </TableRow>
                         ))}
