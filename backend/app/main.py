@@ -1158,6 +1158,153 @@ def create_user(body: NewUser, u: Annotated[dict, Depends(admin)], request: Requ
     return {"ok": True}
 
 
+class BulkUser(BaseModel):
+    email: str
+    full_name: str | None = None
+    username: str | None = None      # blank: taken from the email
+    role: str | None = None          # blank: viewer
+    scope_state: str | None = None
+    scope_facility: str | None = None
+
+
+class BulkUsers(BaseModel):
+    users: list[BulkUser] = Field(min_length=1, max_length=200)
+    # True checks every row and saves nothing, so the list can be corrected
+    # before any account exists.
+    dry_run: bool = True
+
+
+_PW_CHARS = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789"
+
+
+def _temp_password() -> str:
+    """A random first password. No look-alike characters (0/O, 1/l/I), since it
+    is read off a sheet and typed in by hand."""
+    import secrets
+    return "".join(secrets.choice(_PW_CHARS) for _ in range(max(14, MIN_PASSWORD)))
+
+
+def _username_from(email: str, taken: set[str]) -> str:
+    """A sign-in handle from the part of the email before the @, made to fit
+    the username rule and numbered if someone already has it."""
+    base = re.sub(r"[^a-z0-9._-]", ".", email.split("@")[0].lower()).strip("._-")[:28]
+    if len(base) < 3:
+        base = (base + "user")[:28]
+    name, n = base, 1
+    while name in taken:
+        n += 1
+        name = f"{base}{n}"
+    return name
+
+
+@app.post("/api/users/bulk")
+def create_users_bulk(body: BulkUsers, u: Annotated[dict, Depends(admin)],
+                      request: Request):
+    """
+    Create several accounts from one list (Es, 12 Nov 2026: 18 for one state).
+
+    All or nothing: every row is checked first, and if any row has a problem
+    nothing is saved, so a list is never left half-loaded. State and facility
+    must be places in the current line list - a scope naming anywhere else
+    shows an empty dashboard rather than an error - and are matched without
+    regard to case, then stored as the line list spells them.
+
+    The server makes each first password and returns them ONCE, in this
+    response. They are never stored in the clear and cannot be shown again; a
+    lost one is replaced with Reset password. Keeping them out of the list that
+    is pasted in means no password sits in a spreadsheet beforehand.
+    """
+    with pool.connection() as c:
+        places = c.execute(
+            "SELECT DISTINCT c.state, c.facility FROM cohort c "
+            "JOIN uploads up ON up.id=c.upload_id WHERE up.is_current").fetchall()
+        have = c.execute("SELECT lower(username) AS username, email FROM users").fetchall()
+    states = {str(p["state"]).casefold(): p["state"] for p in places if p["state"]}
+    facs: dict[str, list[tuple[str, str]]] = {}
+    for p in places:
+        if p["facility"]:
+            facs.setdefault(str(p["facility"]).strip().casefold(), []).append(
+                (p["facility"], p["state"]))
+    names = {r["username"] for r in have if r["username"]}
+    emails = {r["email"] for r in have}
+
+    rows, seen_email = [], set()
+    for i, r in enumerate(body.users, start=1):
+        errs: list[str] = []
+        email = (r.email or "").lower().strip()
+        if not re.fullmatch(r"[^@\s]+@[^@\s]+\.[^@\s]+", email):
+            errs.append("email is not valid")
+        elif email in emails:
+            errs.append("an account with this email already exists")
+        elif email in seen_email:
+            errs.append("email appears twice in the list")
+        seen_email.add(email)
+
+        role = (r.role or "viewer").strip().lower()
+        if role not in ("admin", "analyst", "viewer"):
+            errs.append("role must be viewer, analyst or admin")
+
+        state = _scope((r.scope_state or "").strip())
+        if state and state.casefold() in ("all", "all states"):
+            state = None
+        if state:
+            if state.casefold() in states:
+                state = states[state.casefold()]
+            else:
+                errs.append(f"state '{state}' is not in the current line list")
+
+        fac = _scope((r.scope_facility or "").strip())
+        if fac and fac.casefold() in ("all", "all facilities"):
+            fac = None
+        if fac:
+            hit = facs.get(fac.casefold())
+            if not hit:
+                errs.append(f"facility '{fac}' is not in the current line list")
+            else:
+                same = [h for h in hit if not state or h[1] == state]
+                if not same:
+                    errs.append(f"facility '{fac}' is not in {state}")
+                else:
+                    fac = same[0][0]
+                    state = state or same[0][1]
+
+        username = (r.username or "").strip().lower()
+        if username:
+            if not _USERNAME_RE.match(username):
+                errs.append("username must be 3-32 letters, numbers, dot, dash or underscore")
+            elif username in names:
+                errs.append("that username is already taken")
+        elif not errs:
+            username = _username_from(email, names)
+        if username and not errs:
+            names.add(username)
+
+        rows.append({"row": i, "email": email, "username": username or None,
+                     "full_name": (r.full_name or "").strip() or username or email,
+                     "role": role, "scope_state": state, "scope_facility": fac,
+                     "errors": errs})
+
+    bad = sum(1 for r in rows if r["errors"])
+    if body.dry_run or bad:
+        return {"ok": bad == 0, "created": 0, "errors": bad, "rows": rows}
+
+    for r in rows:
+        r["password"] = _temp_password()
+    with pool.connection() as c:        # one transaction: all rows or none
+        c.cursor().executemany(
+            "INSERT INTO users (username,email,password_hash,full_name,role,"
+            "scope_state,scope_facility) VALUES (%s,%s,%s,%s,%s,%s,%s)",
+            [(r["username"], r["email"], hash_password(r["password"]), r["full_name"],
+              r["role"], r["scope_state"], r["scope_facility"]) for r in rows])
+    for r in rows:
+        _audit("user.create", user_id=u["id"], email=u["email"], request=request,
+               detail=f"created {r['username']} <{r['email']}> role={r['role']} "
+                      f"scope={r['scope_state'] or 'all states'}"
+                      f"{' / ' + r['scope_facility'] if r['scope_facility'] else ''} "
+                      f"(list of {len(rows)})")
+    return {"ok": True, "created": len(rows), "errors": 0, "rows": rows}
+
+
 @app.patch("/api/users/{uid}")
 def toggle_user(uid: int, u: Annotated[dict, Depends(admin)], request: Request):
     if uid == u["id"]:
