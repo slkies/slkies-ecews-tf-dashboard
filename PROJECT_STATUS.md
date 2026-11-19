@@ -1,6 +1,6 @@
 # ECEWS TF Monitor — Project Status & Handoff
 
-**Last updated:** 6 Nov 2026
+**Last updated:** 19 Nov 2026
 **Owner:** Es (Data Analytics Lead, ECEWS / SPEED Program — PEPFAR/CDC, Nigeria)
 **Purpose:** Online, multi-user web app for HIV ART **treatment-failure (TF)** and
 **EAC** monitoring across Delta, Osun, Ekiti. An admin loads the de-identified line
@@ -20,13 +20,16 @@ repo is public. Credentials live in `.env` (gitignored) or the host's secret sto
 
 ## 1. Where things run
 
-**On `develop`, not yet released** (6 Nov 2026), from the CDC special session of
-4 Nov: the header shows the age of the current line list; every rule on the
-Guidelines page cites its section and page in the 2024 national guidelines; Advanced
-analytics reports the checks on the re-suppression model, and its adjusted intervals
-are clustered on the client (decision 26); a facility account lands on its own
-Facility home page. These are computed when a page is opened, so no new upload is
-needed for them, but the 31 Oct line list still has to be loaded on the live site.
+**Version 2.3** (19 Nov 2026), from the CDC special session of 4 Nov and after: the
+header shows the age of the current line list; every rule on the Guidelines page
+cites its section and page in the 2024 national guidelines; Advanced analytics
+reports the checks on the re-suppression model, and its adjusted intervals are
+clustered on the client (decision 26); a facility account lands on its own Facility
+home page; a client who re-suppressed on a later cycle leaves the DTC lists, and the
+client record orders episodes by result date (decision 27); Admin can create several
+accounts from one pasted list, with first passwords made by the dashboard and shown
+once. **The line list must be loaded again after deploying 2.3**: the decision 27
+flag is computed at load time.
 
 **Version 2.2** (30 Oct 2026): EAC rules corrected (decisions 22 to 25): extended EAC is
 this cycle's session 4 within 60 days of session 3; follow-up samples during EAC are
@@ -69,8 +72,8 @@ docker compose up -d --build        # http://localhost:8080 (compose maps 8080 -
     -e TEST_DATABASE_URL="postgresql://<user>:<password>@db:5432/ecews_test" \
     -v "$(pwd)/backend:/work" -w /work ecews_tf_monitor-api pytest -q
   ```
-  **228 passing** (10 Nov 2026).
-- **Frontend tests:** `cd frontend && npx vitest run` — **174 passing**. Type check:
+  **232 passing** (19 Nov 2026).
+- **Frontend tests:** `cd frontend && npx vitest run` — **180 passing**. Type check:
   `npx tsc --noEmit`. On a busy machine a few tests can run past the 1-second wait
   for a page to appear; each passes when its file is run on its own.
 - **Harness pages** (`/harness-*.html` on the Vite dev server) render each page
