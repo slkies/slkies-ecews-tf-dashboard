@@ -1,4 +1,4 @@
-import { KeyRound, Trash2, UserPlus, Wand2 } from 'lucide-react'
+import { KeyRound, Trash2, UserPlus, Users, Wand2 } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { SortHead, useSort } from '@/components/sortable'
 import { Alert, AlertDescription } from '@/components/ui/alert'
@@ -27,6 +27,7 @@ import { api } from '@/core/api'
 import { useFilters } from '@/core/filters'
 import { DASH } from '@/core/format'
 import { useSession } from '@/core/session'
+import { BulkUsersDialog } from '@/pages/admin-users-bulk'
 
 export interface User {
   id: number; username: string | null; email: string; full_name: string | null
@@ -90,6 +91,7 @@ export default function UsersPanel() {
   const [err, setErr] = useState<string | null>(null)
   const [note, setNote] = useState<string | null>(null)
   const [adding, setAdding] = useState(false)
+  const [addingMany, setAddingMany] = useState(false)
   const [resetFor, setResetFor] = useState<User | null>(null)
   const [deleteFor, setDeleteFor] = useState<User | null>(null)
 
@@ -135,7 +137,10 @@ export default function UsersPanel() {
           admins upload and manage users. A state or facility scope limits everything an account
           sees, exports included. Changes take effect on the person's next click, without signing in again.
         </CardDescription>
-        <CardAction><Button size="sm" onClick={() => setAdding(true)}><UserPlus />Add user</Button></CardAction>
+        <CardAction className="flex gap-2">
+          <Button size="sm" variant="outline" onClick={() => setAddingMany(true)}><Users />Add several</Button>
+          <Button size="sm" onClick={() => setAdding(true)}><UserPlus />Add user</Button>
+        </CardAction>
       </CardHeader>
       <CardContent className="flex flex-col gap-3 px-0">
         {err && <Alert variant="destructive" className="mx-6 w-auto"><AlertDescription>{err}</AlertDescription></Alert>}
@@ -162,6 +167,7 @@ export default function UsersPanel() {
       </CardContent>
 
       <AddUserDialog open={adding} onOpenChange={setAdding} onAdded={(name) => { setNote(`${name} added.`); setErr(null); load() }} />
+      <BulkUsersDialog open={addingMany} onOpenChange={setAddingMany} onCreated={(n) => { setNote(`${n} accounts added.`); setErr(null); load() }} />
       <ResetPasswordDialog user={resetFor} onClose={() => setResetFor(null)} onDone={(name) => setNote(`Password reset for ${name}.`)} />
       <AlertDialog open={deleteFor !== null} onOpenChange={(o) => !o && setDeleteFor(null)}>
         <AlertDialogContent>

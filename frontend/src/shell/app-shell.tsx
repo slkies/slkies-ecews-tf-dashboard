@@ -25,18 +25,26 @@ import ComparePage from '@/pages/compare-page'
 import DataQualityPage from '@/pages/data-quality-page'
 import DeepDivePage from '@/pages/deep-dive-page'
 import DtcPage from '@/pages/dtc-page'
+import FacilityHomePage from '@/pages/facility-home-page'
 import GuidelinesPage from '@/pages/guidelines-page'
 import MethodologyPage from '@/pages/methodology-page'
 import TimeMetricsPage from '@/pages/time-metrics-page'
 import OverviewPage from '@/pages/overview-page'
 import PlansPage from '@/pages/plans-page'
 import WorklistsPage from '@/pages/worklists-page'
-import { NAV } from './nav'
+import { NAV, homeFor, isFacilityAccount, navFor } from './nav'
 
 export default function AppShell() {
   const { query, options } = useFilters()
   const { me } = useSession()
   const [view, setView] = useState('overview')
+  // A facility account lands on its own home page, and only the pages in its
+  // menu can be shown: arriving any other way (a data notice, a stale view)
+  // falls back to the home page rather than a page that is not on the menu.
+  const facility = isFacilityAccount(me)
+  const home = homeFor(me)
+  useEffect(() => { setView(home) }, [home])
+  const allowed = navFor(me).some((n) => n.id === view)
   // Which worklist to open when arriving from another page (a cascade step).
   const [worklistFlag, setWorklistFlag] = useState<string | null>(null)
   // A client's record opens as a page OVER the current one, which stays
@@ -99,16 +107,17 @@ export default function AppShell() {
     return () => { cancelled = true }
   }, [query, options])
 
-  const label = NAV.find((n) => n.id === view)?.label ?? 'Overview'
+  const shown = allowed || !facility ? view : home
+  const label = NAV.find((n) => n.id === shown)?.label ?? 'Overview'
 
   return (
     <ClientRecordProvider onOpen={openClient}>
     <SidebarProvider>
-      <AppSidebar view={view} onNavigate={navigate}
+      <AppSidebar view={shown} onNavigate={navigate}
                   asof={fmtDate(summary?.as_of)} episodes={fmt(summary?.n)}
                   clients={fmt(summary?.clients)} />
       <SidebarInset>
-        <SiteHeader title={clientSn ? 'Client record' : label} onOpenDq={() => navigate('dq')} />
+        <SiteHeader title={clientSn ? 'Client record' : label} onOpenDq={facility ? undefined : () => navigate('dq')} />
         <div className="flex w-full flex-1 flex-col gap-6 p-4 lg:p-6">
           {err && (
             <Alert variant="destructive">
@@ -124,59 +133,63 @@ export default function AppShell() {
             </ErrorBoundary>
           )}
           <div className={clientSn ? 'hidden' : 'contents'}>
-          {view === 'overview' ? (
+          {shown === 'facility' ? (
+            <ErrorBoundary name="Facility home">
+              <FacilityHomePage onOpenWorklist={openWorklist} />
+            </ErrorBoundary>
+          ) : shown === 'overview' ? (
             <ErrorBoundary name="Overview">
               <OverviewPage data={overview} times={times} trend={trend} loading={loading} />
             </ErrorBoundary>
-          ) : view === 'deep' ? (
+          ) : shown === 'deep' ? (
             <ErrorBoundary name="Deep dive">
               <DeepDivePage onOpenWorklist={openWorklist} />
             </ErrorBoundary>
-          ) : view === 'dtc' ? (
+          ) : shown === 'dtc' ? (
             <ErrorBoundary name="DTC review">
               <DtcPage onOpenWorklist={openWorklist} />
             </ErrorBoundary>
-          ) : view === 'compare' ? (
+          ) : shown === 'compare' ? (
             <ErrorBoundary name="Line list changes">
               <ComparePage />
             </ErrorBoundary>
-          ) : view === 'search' ? (
+          ) : shown === 'search' ? (
             <ErrorBoundary name="Client search">
               <ClientSearchPage />
             </ErrorBoundary>
-          ) : view === 'plans' ? (
+          ) : shown === 'plans' ? (
             <ErrorBoundary name="Treatment plans">
               <PlansPage />
             </ErrorBoundary>
-          ) : view === 'adv' ? (
+          ) : shown === 'adv' ? (
             <ErrorBoundary name="Advanced analytics">
               <AdvancedPage />
             </ErrorBoundary>
-          ) : view === 'dq' ? (
+          ) : shown === 'dq' ? (
             <ErrorBoundary name="Data quality">
               <DataQualityPage />
             </ErrorBoundary>
-          ) : view === 'guide' ? (
+          ) : shown === 'guide' ? (
             <ErrorBoundary name="Guidelines">
               <GuidelinesPage />
             </ErrorBoundary>
-          ) : view === 'method' ? (
+          ) : shown === 'method' ? (
             <ErrorBoundary name="Methodology">
               <MethodologyPage />
             </ErrorBoundary>
-          ) : view === 'admin' && me?.role === 'admin' ? (
+          ) : shown === 'admin' && me?.role === 'admin' ? (
             <ErrorBoundary name="Admin">
               <AdminPage />
             </ErrorBoundary>
-          ) : view === 'time' ? (
+          ) : shown === 'time' ? (
             <ErrorBoundary name="Time metrics">
               <TimeMetricsPage />
             </ErrorBoundary>
-          ) : view === 'cascade' ? (
+          ) : shown === 'cascade' ? (
             <ErrorBoundary name="Cascade">
               <CascadePage onOpenWorklist={openWorklist} />
             </ErrorBoundary>
-          ) : view === 'worklists' ? (
+          ) : shown === 'worklists' ? (
             <ErrorBoundary name="Worklists">
               <WorklistsPage key={worklistFlag ?? 'default'} initialFlag={worklistFlag} />
             </ErrorBoundary>

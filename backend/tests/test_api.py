@@ -17,7 +17,7 @@ import pytest
 from conftest import ADMIN, hdr   # tests/ is not a package; pytest adds it to sys.path
 
 PROTECTED = ["/api/summary", "/api/overview", "/api/clients", "/api/export",
-             "/api/filters", "/api/dq", "/api/uploads", "/api/users",
+             "/api/filters", "/api/dq", "/api/dq/scoped", "/api/uploads", "/api/users",
              "/api/audit", "/api/cascade", "/api/plans"]
 
 ADMIN_ONLY = ["/api/users", "/api/audit", "/api/feedback"]
@@ -699,6 +699,24 @@ def test_worklist_counts_respect_scope(client, admin_h, cohort):
     assert all(delta[k] <= everyone[k] for k in everyone if everyone[k] is not None)
 
 
+def test_scoped_findings_cover_only_the_accounts_rows(client, admin_h, cohort):
+    # A facility or state account's data-quality findings come from its own
+    # rows (CDC session, 4 Nov 2026), and are counts with no identifiers in them.
+    everyone = {f["check_name"]: f["n_records"]
+                for f in client.get("/api/dq/scoped", headers=admin_h).json()}
+    h = _scoped_viewer(client, admin_h, "Delta")
+    r = client.get("/api/dq/scoped", headers=h)
+    assert r.status_code == 200
+    delta = {f["check_name"]: f["n_records"] for f in r.json()}
+    assert delta and set(delta) == set(everyone)
+    assert all(delta[k] <= everyone[k] for k in delta)
+    assert all(set(f) == {"sheet", "check_name", "severity", "n_records", "detail"} for f in r.json())
+    # Asking for another state changes nothing: scope wins, as everywhere.
+    osun = {f["check_name"]: f["n_records"]
+            for f in client.get("/api/dq/scoped?state=Osun", headers=h).json()}
+    assert osun == delta
+
+
 def test_admin_can_export_only_the_selected_episodes(client, admin_h, cohort):
     rows = client.get("/api/clients", headers=admin_h).json()
     chosen = [r["episode"] for r in rows[:2]]
@@ -875,6 +893,33 @@ def test_client_record_lists_episodes_and_their_worklists(client, admin_h, cohor
     assert ep["idx_vl"] == 5000 and isinstance(ep["worklists"], list)
 
 
+def test_client_record_orders_episodes_by_result_date_when_received_dates_tie(client, admin_h, cohort):
+    """Two episodes carrying the same received date (the EMR left the old one in
+    place): the later RESULT is the newer episode, whatever order they load in."""
+    from app.main import pool
+    with pool.connection() as c:
+        for vl, samp in ((1970, "2026-05-08"), (15800, "2026-01-23")):
+            c.execute(
+                "INSERT INTO cohort (upload_id,sn,episode,state,lga,facility,"
+                "sex,age,age_band,art_status,idx_vl,idx_date,idx_samp,recv_date,fy_quarter,"
+                "enrol_quarter,fy,eac1,post_result,resuppressed) VALUES "
+                "(%s,'0.800000000002',%s,'Delta','Warri','Clinic A',"
+                "'Female',35,'35-44','Active',%s,%s,%s,'2026-02-13','FY26Q2','FY26Q2','FY26',"
+                "TRUE,TRUE,FALSE)", (cohort, f"0.800000000002|{samp}", vl, samp, samp))
+        # and the same pair entered the other way round, for a second client
+        for vl, samp in ((15800, "2026-01-23"), (1970, "2026-05-08")):
+            c.execute(
+                "INSERT INTO cohort (upload_id,sn,episode,state,lga,facility,"
+                "sex,age,age_band,art_status,idx_vl,idx_date,idx_samp,recv_date,fy_quarter,"
+                "enrol_quarter,fy,eac1,post_result,resuppressed) VALUES "
+                "(%s,'0.800000000003',%s,'Delta','Warri','Clinic A',"
+                "'Female',35,'35-44','Active',%s,%s,%s,'2026-02-13','FY26Q2','FY26Q2','FY26',"
+                "TRUE,TRUE,FALSE)", (cohort, f"0.800000000003|{samp}", vl, samp, samp))
+    for sn in ("0.800000000002", "0.800000000003"):
+        eps = client.get(f"/api/client/{sn}", headers=admin_h).json()["episodes"]
+        assert [e["idx_vl"] for e in eps] == [1970, 15800], "newest result first"
+
+
 def test_client_lookups_are_audited(client, admin_h, cohort):
     client.get("/api/client-search?q=000003", headers=admin_h)
     client.get("/api/client/0.100000000003", headers=admin_h)
@@ -882,3 +927,65 @@ def test_client_lookups_are_audited(client, admin_h, cohort):
     actions = {a["action"] for a in audit["actions"]}
     assert "clients.search" in actions
     assert any("client record" in (r["detail"] or "") for r in audit["rows"])
+
+
+# ── several accounts from one list (12 Nov 2026) ──────────────────────
+_LIST = [
+    {"full_name": "Ada One", "email": "Ada.One@ecews.org", "role": "viewer",
+     "scope_state": "delta", "scope_facility": "clinic a"},
+    {"full_name": "Bola Two", "email": "bola@ecews.org", "role": "Analyst",
+     "scope_state": "Osun", "scope_facility": ""},
+    {"full_name": "", "email": "chi@ecews.org", "role": "", "scope_state": "",
+     "scope_facility": "Clinic C"},
+]
+
+
+def test_a_list_of_accounts_is_checked_before_anything_is_saved(client, admin_h, cohort):
+    before = len(client.get("/api/users", headers=admin_h).json())
+    r = client.post("/api/users/bulk", headers=admin_h, json={"users": _LIST}).json()
+    assert r["ok"] and r["created"] == 0 and all("password" not in x for x in r["rows"])
+    # places are matched without regard to case and stored as the line list spells them
+    assert (r["rows"][0]["scope_state"], r["rows"][0]["scope_facility"]) == ("Delta", "Clinic A")
+    # a facility on its own brings its state with it
+    assert (r["rows"][2]["scope_state"], r["rows"][2]["role"]) == ("Osun", "viewer")
+    assert len(client.get("/api/users", headers=admin_h).json()) == before
+
+
+def test_a_list_of_accounts_is_created_with_one_time_passwords(client, admin_h, cohort):
+    r = client.post("/api/users/bulk", headers=admin_h,
+                    json={"users": _LIST, "dry_run": False}).json()
+    assert r["created"] == 3
+    made = {x["email"]: x for x in r["rows"]}
+    assert len({x["password"] for x in r["rows"]}) == 3
+    # each one signs in, and sees only its own place
+    one = made["ada.one@ecews.org"]
+    assert one["username"] == "ada.one"
+    h = hdr(client, (one["username"], one["password"]))
+    assert {c["facility"] for c in client.get("/api/clients", headers=h).json()} == {"Clinic A"}
+    # passwords are not readable afterwards, and each account is on the audit trail
+    assert all("password" not in x for x in client.get("/api/users", headers=admin_h).json())
+    audit = client.get("/api/audit", headers=admin_h).json()
+    assert sum("list of 3" in (a["detail"] or "") for a in audit["rows"]) == 3
+    assert not any(one["password"] in (a["detail"] or "") for a in audit["rows"])
+
+
+def test_one_bad_row_stops_the_whole_list(client, admin_h, cohort):
+    before = len(client.get("/api/users", headers=admin_h).json())
+    rows = _LIST + [
+        {"email": "not-an-email", "role": "viewer"},
+        {"email": "bola@ecews.org"},                                   # twice in the list
+        {"email": "d@ecews.org", "scope_state": "Delta", "scope_facility": "Clinic C"},
+        {"email": "e@ecews.org", "role": "owner", "scope_facility": "Nowhere Clinic"},
+    ]
+    r = client.post("/api/users/bulk", headers=admin_h,
+                    json={"users": rows, "dry_run": False}).json()
+    assert not r["ok"] and r["created"] == 0 and r["errors"] == 4
+    errs = [" ".join(x["errors"]) for x in r["rows"]]
+    assert "not valid" in errs[3] and "twice" in errs[4]
+    assert "not in Delta" in errs[5] and "role" in errs[6] and "Nowhere Clinic" in errs[6]
+    assert len(client.get("/api/users", headers=admin_h).json()) == before
+
+
+def test_only_an_admin_can_create_a_list_of_accounts(client, viewer_h, cohort):
+    r = client.post("/api/users/bulk", headers=viewer_h, json={"users": _LIST, "dry_run": False})
+    assert r.status_code == 403

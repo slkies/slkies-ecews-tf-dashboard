@@ -18,6 +18,13 @@ export default class ErrorBoundary extends Component<
 
   static getDerivedStateFromError(error: Error) { return { error } }
 
+  // One boundary instance can serve several pages in turn (the shell swaps the
+  // page inside it), so a fault on one page must not follow the user to the
+  // next: a new page name clears it.
+  componentDidUpdate(prev: { name: string }) {
+    if (prev.name !== this.props.name && this.state.error) this.setState({ error: null })
+  }
+
   componentDidCatch(error: Error, info: ErrorInfo) {
     console.error(`${this.props.name} render:`, error, info.componentStack)
   }

@@ -33,7 +33,7 @@ from psycopg_pool import ConnectionPool
 from pydantic import BaseModel, Field
 
 from . import indicators as ind
-from .ingest import COHORT_COLS, cohort_records, ingest_workbook
+from .ingest import COHORT_COLS, cohort_findings, cohort_records, ingest_workbook
 from .version import build_info
 from .security import create_token, decode_token, hash_password, verify_password
 
@@ -405,7 +405,7 @@ def _load(u: dict, f: Filters, upload_id: int | None = None) -> pd.DataFrame:
               "dtc_review", "paed",
               # worklist flags read straight from the cohort; missing from this
               # list, a NULL in any of them made that worklist fail outright
-              "post_eac_vl", "awaiting_switch", "prior_switch",
+              "post_eac_vl", "awaiting_switch", "prior_switch", "resupp_later",
               "eac_trunc_pre", "eac_trunc_mid", "vl_at_next_visit"):
         if b in df:
             df[b] = df[b].fillna(False).astype(bool)
@@ -785,8 +785,8 @@ _RECORD_EPISODE = ["episode", "idx_vl", "idx_samp", "recv_date", "idx_date",
                    "eac1", "eac2", "eac3", "eac_extended", "vl_at_next_visit", "eac_cycle_no",
                    "eac_completed", "sessions", "post_eac_vl", "fu_samp", "fu_date",
                    "fu_vl", "awaiting_result", "resuppressed", "llv",
-                   "still_unsuppressed", "switched", "months_unsuppressed",
-                   "treatment_plan"]
+                   "still_unsuppressed", "switched", "resupp_later",
+                   "months_unsuppressed", "treatment_plan"]
 
 
 @app.get("/api/client-search")
@@ -837,9 +837,13 @@ def client_search(u: U, request: Request,
     if df.empty:
         rows, n = [], 0
     else:
+        # Ties on the received date go to the later result, so the row shown
+        # for a client is their newest episode (see client_record below).
         df = df.assign(_recv=pd.to_datetime(df["recv_date"].fillna(df["idx_date"]),
-                                            errors="coerce"))
-        latest = df.sort_values("_recv", ascending=False).drop_duplicates("sn")
+                                            errors="coerce"),
+                       _idx=pd.to_datetime(df["idx_date"], errors="coerce"))
+        latest = (df.sort_values(["_recv", "_idx"], ascending=False, kind="mergesort")
+                    .drop_duplicates("sn"))
         latest = latest.assign(episodes=latest["sn"].map(df["sn"].value_counts()))
         n = len(latest)
         rows = _json_safe(latest[["sn", "facility", "state", "sex", "age", "art_status",
@@ -865,8 +869,19 @@ def client_record(sn: str, u: U, request: Request):
     df = df[df["sn"].astype("string").eq(sn)] if not df.empty else df
     if df.empty:
         raise HTTPException(404, "No client with that S/N in your area.")
-    df = df.assign(_recv=pd.to_datetime(df["recv_date"].fillna(df["idx_date"]),
-                                        errors="coerce")).sort_values("_recv", ascending=False)
+    # Newest first by the RESULT date, then the sample, then the received date.
+    # It was the received date alone, and two episodes carrying the same
+    # received date (the EMR leaves the old one in place when a new result is
+    # typed over it) came out in either order - a client's second episode was
+    # shown as "Episode 1" (Es, 10 Nov 2026). The result date leads because it
+    # is the one that stays with its result: on 189 register rows the sample
+    # date belongs to a later repeat sample, and on 33 the received date is an
+    # earlier result's (decision 27).
+    def _d(col):
+        return pd.to_datetime(df[col], errors="coerce") if col in df else pd.NaT
+    df = (df.assign(_idx=_d("idx_date"), _samp=_d("idx_samp"), _recv=_d("recv_date"))
+            .assign(_idx=lambda x: x["_idx"].fillna(x["_samp"]).fillna(x["_recv"]))
+            .sort_values(["_idx", "_samp", "_recv"], ascending=False, kind="mergesort"))
     eps = _json_safe(df[[c for c in _RECORD_EPISODE if c in df.columns]])
     for e, (_, row) in zip(eps, df.iterrows()):
         one = df.loc[[row.name]]
@@ -1141,6 +1156,153 @@ def create_user(body: NewUser, u: Annotated[dict, Depends(admin)], request: Requ
            detail=f"created {username} <{email}> role={role} "
                   f"scope={body.scope_state or 'all states'}")
     return {"ok": True}
+
+
+class BulkUser(BaseModel):
+    email: str
+    full_name: str | None = None
+    username: str | None = None      # blank: taken from the email
+    role: str | None = None          # blank: viewer
+    scope_state: str | None = None
+    scope_facility: str | None = None
+
+
+class BulkUsers(BaseModel):
+    users: list[BulkUser] = Field(min_length=1, max_length=200)
+    # True checks every row and saves nothing, so the list can be corrected
+    # before any account exists.
+    dry_run: bool = True
+
+
+_PW_CHARS = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789"
+
+
+def _temp_password() -> str:
+    """A random first password. No look-alike characters (0/O, 1/l/I), since it
+    is read off a sheet and typed in by hand."""
+    import secrets
+    return "".join(secrets.choice(_PW_CHARS) for _ in range(max(14, MIN_PASSWORD)))
+
+
+def _username_from(email: str, taken: set[str]) -> str:
+    """A sign-in handle from the part of the email before the @, made to fit
+    the username rule and numbered if someone already has it."""
+    base = re.sub(r"[^a-z0-9._-]", ".", email.split("@")[0].lower()).strip("._-")[:28]
+    if len(base) < 3:
+        base = (base + "user")[:28]
+    name, n = base, 1
+    while name in taken:
+        n += 1
+        name = f"{base}{n}"
+    return name
+
+
+@app.post("/api/users/bulk")
+def create_users_bulk(body: BulkUsers, u: Annotated[dict, Depends(admin)],
+                      request: Request):
+    """
+    Create several accounts from one list (Es, 12 Nov 2026: 18 for one state).
+
+    All or nothing: every row is checked first, and if any row has a problem
+    nothing is saved, so a list is never left half-loaded. State and facility
+    must be places in the current line list - a scope naming anywhere else
+    shows an empty dashboard rather than an error - and are matched without
+    regard to case, then stored as the line list spells them.
+
+    The server makes each first password and returns them ONCE, in this
+    response. They are never stored in the clear and cannot be shown again; a
+    lost one is replaced with Reset password. Keeping them out of the list that
+    is pasted in means no password sits in a spreadsheet beforehand.
+    """
+    with pool.connection() as c:
+        places = c.execute(
+            "SELECT DISTINCT c.state, c.facility FROM cohort c "
+            "JOIN uploads up ON up.id=c.upload_id WHERE up.is_current").fetchall()
+        have = c.execute("SELECT lower(username) AS username, email FROM users").fetchall()
+    states = {str(p["state"]).casefold(): p["state"] for p in places if p["state"]}
+    facs: dict[str, list[tuple[str, str]]] = {}
+    for p in places:
+        if p["facility"]:
+            facs.setdefault(str(p["facility"]).strip().casefold(), []).append(
+                (p["facility"], p["state"]))
+    names = {r["username"] for r in have if r["username"]}
+    emails = {r["email"] for r in have}
+
+    rows, seen_email = [], set()
+    for i, r in enumerate(body.users, start=1):
+        errs: list[str] = []
+        email = (r.email or "").lower().strip()
+        if not re.fullmatch(r"[^@\s]+@[^@\s]+\.[^@\s]+", email):
+            errs.append("email is not valid")
+        elif email in emails:
+            errs.append("an account with this email already exists")
+        elif email in seen_email:
+            errs.append("email appears twice in the list")
+        seen_email.add(email)
+
+        role = (r.role or "viewer").strip().lower()
+        if role not in ("admin", "analyst", "viewer"):
+            errs.append("role must be viewer, analyst or admin")
+
+        state = _scope((r.scope_state or "").strip())
+        if state and state.casefold() in ("all", "all states"):
+            state = None
+        if state:
+            if state.casefold() in states:
+                state = states[state.casefold()]
+            else:
+                errs.append(f"state '{state}' is not in the current line list")
+
+        fac = _scope((r.scope_facility or "").strip())
+        if fac and fac.casefold() in ("all", "all facilities"):
+            fac = None
+        if fac:
+            hit = facs.get(fac.casefold())
+            if not hit:
+                errs.append(f"facility '{fac}' is not in the current line list")
+            else:
+                same = [h for h in hit if not state or h[1] == state]
+                if not same:
+                    errs.append(f"facility '{fac}' is not in {state}")
+                else:
+                    fac = same[0][0]
+                    state = state or same[0][1]
+
+        username = (r.username or "").strip().lower()
+        if username:
+            if not _USERNAME_RE.match(username):
+                errs.append("username must be 3-32 letters, numbers, dot, dash or underscore")
+            elif username in names:
+                errs.append("that username is already taken")
+        elif not errs:
+            username = _username_from(email, names)
+        if username and not errs:
+            names.add(username)
+
+        rows.append({"row": i, "email": email, "username": username or None,
+                     "full_name": (r.full_name or "").strip() or username or email,
+                     "role": role, "scope_state": state, "scope_facility": fac,
+                     "errors": errs})
+
+    bad = sum(1 for r in rows if r["errors"])
+    if body.dry_run or bad:
+        return {"ok": bad == 0, "created": 0, "errors": bad, "rows": rows}
+
+    for r in rows:
+        r["password"] = _temp_password()
+    with pool.connection() as c:        # one transaction: all rows or none
+        c.cursor().executemany(
+            "INSERT INTO users (username,email,password_hash,full_name,role,"
+            "scope_state,scope_facility) VALUES (%s,%s,%s,%s,%s,%s,%s)",
+            [(r["username"], r["email"], hash_password(r["password"]), r["full_name"],
+              r["role"], r["scope_state"], r["scope_facility"]) for r in rows])
+    for r in rows:
+        _audit("user.create", user_id=u["id"], email=u["email"], request=request,
+               detail=f"created {r['username']} <{r['email']}> role={r['role']} "
+                      f"scope={r['scope_state'] or 'all states'}"
+                      f"{' / ' + r['scope_facility'] if r['scope_facility'] else ''} "
+                      f"(list of {len(rows)})")
+    return {"ok": True, "created": len(rows), "errors": 0, "rows": rows}
 
 
 @app.patch("/api/users/{uid}")
@@ -1470,6 +1632,22 @@ def get_dq(u: U):
             "n_records DESC", (uid,)).fetchall()
 
 
+_SEV = {"critical": 0, "high": 1, "medium": 2, "low": 3, "clear": 4}
+
+
+@app.get("/api/dq/scoped")
+def get_dq_scoped(u: U, f: F):
+    """The cohort checks recomputed on the account's own rows and filters.
+
+    /api/dq holds the findings stored at upload, for the whole programme. A
+    facility account needs its own facility's (CDC session, 4 Nov 2026), so
+    the cohort checks run again on exactly what `_load` lets it see. Counts
+    only: no row, key or identifier leaves this endpoint.
+    """
+    out = cohort_findings(_load(u, f))
+    return sorted(out, key=lambda r: (_SEV.get(r["severity"], 9), -r["n_records"]))
+
+
 @app.get("/api/overview")
 def overview(u: U, f: F):
     """Everything the Overview page needs, in one round trip."""
@@ -1709,6 +1887,12 @@ def overview(u: U, f: F):
         "switch_eligible": len(sw_elig),
         "switched": switched,
         "prior_switch": prior_sw,
+        # Still >= 1,000 on the episode, re-suppressed on a later one, never
+        # switched: off the DTC lists, and counted so the groups still add up.
+        "resolved_later": int((df["still_unsuppressed"].fillna(False).astype(bool)
+                               & df.get("resupp_later", pd.Series(False, index=df.index))
+                                   .fillna(False).astype(bool)
+                               & ~df["switched"].fillna(False).astype(bool)).sum()),
         "switch_pct": rate(switched, len(sw_elig)),
         "awaiting_switch": int(df["awaiting_switch"].fillna(False).astype(bool).sum()),
         "repeat_failure": repeats_fail,

@@ -810,6 +810,21 @@ def build_cohort(
     df["still_unsuppressed"] = df["post_result"] & (df["fu_vl"] >= VL_FAIL)
     df["repeat_failure"] = take_nxt & (nxt_vl >= VL_FAIL)
 
+    # ── RE-SUPPRESSED SINCE (Es, 10 Nov 2026) ─────────────────────────────
+    # An episode stays "still unsuppressed" for good: that is what its own
+    # follow-up VL said, and the cascade counts it. But the lists that ask
+    # someone to ACT on it must look at the client as they are now. A client
+    # whose first cycle ended at 1,970, who went through a second cycle and
+    # came back at 19, was still listed for DTC review on the first episode -
+    # the committee would have been asked to switch a suppressed client.
+    #
+    # So: an episode is "re-suppressed since" when a LATER episode of the same
+    # client re-suppressed. The frame is in client and sample order here (the
+    # sort above), which is the order the follow-up itself is read in.
+    _rs = df["resuppressed"].fillna(False).astype(bool).astype(int)
+    _from_here = _rs.iloc[::-1].groupby(df["sn"].iloc[::-1]).cumsum()
+    df["resupp_later"] = ((_from_here.reindex(df.index) - _rs) > 0).astype(bool)
+
     # ── SWITCHING (team review, 19 Jul 2026) ──────────────────────────────
     # A genuine switch requires the regimen at the INDEX unsuppressed VL to have
     # been first-line, and the client to be on 2nd/3rd line in a later treatment
@@ -826,15 +841,18 @@ def build_cohort(
                       pd.Series(pd.NA, index=df.index)).astype("string").str.lower())
     df["idx_on_2nd"] = idxline.str.contains(_2ND, regex=True, na=False)  # NA -> False (assume 1st)
     su = df["still_unsuppressed"]
+    # Open = nothing since has closed the question. A client who has since
+    # re-suppressed is not waiting for the committee (see resupp_later above).
+    open_ = ~df["resupp_later"]
     df["switch_eligible"] = (su & ~df["idx_on_2nd"]).fillna(False).astype(bool)
     df["switched"] = (su & ~df["idx_on_2nd"] & df["on_second_line"]).fillna(False).astype(bool)
-    df["prior_switch"] = (su & df["idx_on_2nd"]).fillna(False).astype(bool)
+    df["prior_switch"] = (su & df["idx_on_2nd"] & open_).fillna(False).astype(bool)
     # Awaiting DTC review also requires COMPLETED EAC (decision 24): the list is
     # "still unsuppressed after EAC", and a client who never finished EAC needs
     # the EAC, not the committee. Those are on the EAC lists already, and are
     # counted below as "EAC not completed" so the four groups add up.
     df["awaiting_switch"] = (su & ~df["idx_on_2nd"] & ~df["on_second_line"]
-                             & df["eac_completed"]).fillna(False).astype(bool)
+                             & df["eac_completed"] & open_).fillna(False).astype(bool)
 
     samp = df["fu_samp"]
     res = df["fu_samp"]      # sample date is the clock for post-EAC timing
@@ -882,7 +900,8 @@ def build_cohort(
     eac1 = df["eac1"].fillna(False).astype(bool)
     cum = eac1.loc[order].astype(int).groupby(df.loc[order, "sn"]).cumsum()
     df["eac_cycle_no"] = cum.reindex(df.index).where(eac1)
-    df["dtc_review"] = ((df["eac_cycle_no"] > 2) & ~df["resuppressed"].astype(bool)).fillna(False).astype(bool)
+    df["dtc_review"] = ((df["eac_cycle_no"] > 2) & ~df["resuppressed"].astype(bool)
+                        & ~df["resupp_later"]).fillna(False).astype(bool)
 
     # --- §5: time-dependent ---------------------------------------------
     # A negative interval here means the sample predates session 1 - that cycle
@@ -946,6 +965,10 @@ def _plan(r: pd.Series, as_of: pd.Timestamp) -> str:
     has_result = bool(r.get("post_result"))
     fu = r.get("fu_vl")
 
+    # Re-suppressed on a later episode: the plan is the suppressed client's
+    # plan, whatever this episode's own follow-up read (Es, 10 Nov 2026).
+    if bool(r.get("resupp_later")):
+        return "D. Repeat VL in 6 months, continue adherence counselling"
     if has_result and pd.notna(fu) and fu >= VL_FAIL and bool(r.get("eac_completed")):
         return "F. Refer to Drug Therapeutic Committee, update register and EMR"
     if has_result and pd.notna(fu) and fu < VL_FAIL:
@@ -1762,12 +1785,14 @@ def _cochran_armitage_p(counts: list[tuple[int, int]]) -> float:
     return _p_z(num / math.sqrt(var))
 
 
-def _logit_fit(X: np.ndarray, y: np.ndarray):
-    """Newton-Raphson logistic fit. Returns (beta, se) with a tiny ridge."""
+def _logit_newton(X: np.ndarray, y: np.ndarray):
+    """Newton-Raphson logistic fit with a tiny ridge.
+    Returns (beta, cov, converged)."""
     n, k = X.shape
     beta = np.zeros(k)
     ridge = 1e-3 * np.eye(k)   # mild L2 to tame quasi-separated sparse levels
     ridge[0, 0] = 0.0          # never penalise the intercept
+    converged = False
     for _ in range(60):
         p = 1 / (1 + np.exp(-(X @ beta)))
         W = np.clip(p * (1 - p), 1e-9, None)
@@ -1779,11 +1804,206 @@ def _logit_fit(X: np.ndarray, y: np.ndarray):
             break
         beta += step
         if np.max(np.abs(step)) < 1e-8:
+            converged = True
             break
     p = 1 / (1 + np.exp(-(X @ beta)))
     W = np.clip(p * (1 - p), 1e-9, None)
     cov = np.linalg.inv(X.T @ (X * W[:, None]) + ridge)
+    return beta, cov, converged
+
+
+def _logit_fit(X: np.ndarray, y: np.ndarray):
+    """Newton-Raphson logistic fit. Returns (beta, se) with a tiny ridge."""
+    beta, cov, _ = _logit_newton(X, y)
     return beta, np.sqrt(np.diag(cov))
+
+
+# ── diagnostics for the adjusted-odds-ratio model ─────────────────────
+# Asked at the CDC session (4 Nov 2026): were the model's assumptions met?
+# These are the standard checks for a multivariable logistic regression, run
+# on the same fit the page reports. They describe the estimates; they do not
+# change them. Each returns a plain verdict so the page can say pass or check.
+
+def _chi2_sf(x: float, k: int) -> float:
+    """Upper-tail chi-square p-value (Wilson-Hilferty), as `_chi2_p` uses."""
+    if k <= 0 or math.isnan(x):
+        return 1.0
+    if x <= 0:
+        return 1.0
+    t = (x / k) ** (1 / 3)
+    z = (t - (1 - 2 / (9 * k))) / math.sqrt(2 / (9 * k))
+    return round(1 - _phi(z), 4)
+
+
+def _auc(y: np.ndarray, p: np.ndarray) -> float | None:
+    """c-statistic: rank-based, ties averaged."""
+    pos, neg = int(y.sum()), int(len(y) - y.sum())
+    if not pos or not neg:
+        return None
+    _, inv, cnt = np.unique(p, return_inverse=True, return_counts=True)
+    order = p.argsort()
+    r = np.empty(len(p))
+    r[order] = np.arange(1, len(p) + 1)
+    sums = np.zeros(len(cnt))
+    np.add.at(sums, inv, r)
+    r = (sums / cnt)[inv]
+    return round(float((r[y == 1].sum() - pos * (pos + 1) / 2) / (pos * neg)), 3)
+
+
+def _hosmer_lemeshow(y: np.ndarray, p: np.ndarray, groups: int = 10):
+    """Hosmer-Lemeshow statistic over deciles of predicted risk: (chi2, df, p)."""
+    order = np.argsort(p, kind="stable")
+    stat, used = 0.0, 0
+    for g in np.array_split(order, groups):
+        if not len(g):
+            continue
+        n, o, e = len(g), float(y[g].sum()), float(p[g].sum())
+        v = e * (1 - e / n)
+        if v > 0:
+            stat += (o - e) ** 2 / v
+            used += 1
+    df = max(used - 2, 1)
+    return round(stat, 2), df, _chi2_sf(stat, df)
+
+
+def _gvif(X: np.ndarray, groups: dict[str, list[int]]) -> dict[str, float]:
+    """Generalised VIF per variable (Fox & Monette), reported as GVIF^(1/(2df))
+    so a variable with several dummy columns reads on the same scale as a VIF's
+    square root. Columns without variance are left out."""
+    keep = [j for j in range(1, X.shape[1]) if X[:, j].std() > 0]
+    if len(keep) < 2:
+        return {}
+    R = np.corrcoef(X[:, keep], rowvar=False)
+    detR = np.linalg.det(R)
+    pos = {j: i for i, j in enumerate(keep)}
+    out = {}
+    for name, cols in groups.items():
+        a = [pos[j] for j in cols if j in pos]
+        b = [i for i in range(len(keep)) if i not in a]
+        if not a or not b or detR <= 0:
+            continue
+        g = np.linalg.det(R[np.ix_(a, a)]) * np.linalg.det(R[np.ix_(b, b)]) / detR
+        out[name] = round(float(g ** (1 / (2 * len(a)))), 2)
+    return out
+
+
+def _cluster_se(X: np.ndarray, y: np.ndarray, beta: np.ndarray, cov: np.ndarray,
+                clusters: np.ndarray) -> np.ndarray:
+    """Cluster-robust (sandwich) standard errors, clustered on the client, with
+    the usual G/(G-1) small-sample correction."""
+    p = 1 / (1 + np.exp(-(X @ beta)))
+    u = X * (y - p)[:, None]
+    _, inv = np.unique(clusters, return_inverse=True)
+    G = int(inv.max()) + 1
+    S = np.zeros((G, X.shape[1]))
+    np.add.at(S, inv, u)
+    meat = S.T @ S
+    V = cov @ meat @ cov * (G / (G - 1) if G > 1 else 1.0)
+    return np.sqrt(np.clip(np.diag(V), 0, None))
+
+
+def _model_diagnostics(X, y, names, beta, cov, converged, yrs, clusters) -> dict:
+    k = X.shape[1] - 1                                    # parameters bar the intercept
+    p = 1 / (1 + np.exp(-(X @ beta)))
+    se = np.sqrt(np.diag(cov))
+    events, non = int(y.sum()), int(len(y) - y.sum())
+    epv = round(min(events, non) / k, 1) if k else None
+    checks = []
+
+    def add(key, label, ok, result, note, status=None):
+        checks.append({"key": key, "label": label, "result": result, "note": note,
+                       "status": status or ("pass" if ok else "check")})
+
+    add("converged", "Model fit converged", converged,
+        "Yes" if converged else "No",
+        "The estimates settled; a fit that does not converge gives unreliable odds ratios.")
+
+    add("epv", "Outcome events per parameter", epv is not None and epv >= 10,
+        f"{epv} ({min(events, non):,} of the rarer outcome, {k} parameters)",
+        "At least 10 is the usual floor; fewer risks overfitted, unstable estimates.")
+
+    groups: dict[str, list[int]] = {}
+    for j, nm in enumerate(names):
+        if j:
+            groups.setdefault(nm.split("::")[0], []).append(j)
+    labels = {s[0]: s[1] for s in _DD_SPECS} | {"_yrs": "Years on ART"}
+    gv = _gvif(X, groups)
+    if gv:
+        worst = max(gv, key=gv.get)
+        add("collinearity", "Collinearity between predictors", gv[worst] <= math.sqrt(5),
+            f"Highest adjusted GVIF {gv[worst]:.2f} ({labels.get(worst, worst)})",
+            "Above 2.24, the equivalent of a VIF of 5, predictors overlap enough to blur each other's effect.")
+
+    hl, hdf, hp = _hosmer_lemeshow(y, p)
+    add("fit", "Goodness of fit (Hosmer-Lemeshow, 10 groups)", hp >= 0.05,
+        f"χ² {hl} on {hdf} df, p = {hp:.3f}",
+        "A p-value under 0.05 means predicted and observed re-suppression differ across risk groups. "
+        "With thousands of episodes the test flags even small differences.")
+
+    auc = _auc(y, p)
+    add("auc", "Discrimination (c-statistic)", True,
+        "—" if auc is None else f"{auc:.3f}",
+        "How well the model separates those who re-suppress from those who do not; 0.5 is chance. "
+        "Reported for context: the model explains, it is not used to rank clients.", status="info")
+
+    # Box-Tidwell: add x·ln(x); a significant term means the log-odds are not
+    # linear in years on ART, so a single per-year odds ratio misdescribes it.
+    x = np.clip(np.asarray(yrs, float), 1 / 365, None)
+    Xb = np.column_stack([X, x * np.log(x)])
+    bb, cb, _ = _logit_newton(Xb, y)
+    sb = math.sqrt(cb[-1, -1])
+    bt_p = _p_z(bb[-1] / sb) if sb > 0 else 1.0
+    add("linearity", "Linearity of years on ART (Box-Tidwell)", bt_p >= 0.05,
+        f"p = {bt_p:.3f}",
+        "Under 0.05, the effect of years on ART is not constant per year, and one odds ratio per year oversimplifies it.")
+
+    # A level separates when everyone in it, or no one, re-suppressed. A level
+    # nobody is in is not estimable either way and is not counted as separation.
+    def nice(nm):
+        key, _, lv = nm.partition("::")
+        return f"{labels.get(key, key)}: {lv}" if lv else labels.get(key, key)
+    big = []
+    for j, nm in enumerate(names):
+        col = X[:, j]
+        if not j or not np.isin(col, (0.0, 1.0)).all():
+            continue
+        n1 = int(col.sum())
+        e1 = int(y[col == 1].sum())
+        if n1 and (e1 == 0 or e1 == n1):
+            big.append(nice(nm))
+    add("separation", "Separation (a level that predicts the outcome perfectly)", not big,
+        "None" if not big else ", ".join(big),
+        "A level where everyone, or no one, re-suppressed gives an infinite odds ratio. "
+        "Repeat failure is excluded from the predictors for this reason.")
+
+    # The page's intervals are clustered on the client (decision 26). This check
+    # says what that changed: factors that would read as significant, or not,
+    # had every episode been treated as an independent client.
+    rse = _cluster_se(X, y, beta, cov, clusters)
+    n_cl = int(len(np.unique(clusters)))
+    flip_ci = []
+    for j, nm in enumerate(names):
+        if not j or se[j] <= 0 or rse[j] <= 0:
+            continue
+        if (abs(beta[j] / se[j]) >= 1.96) != (abs(beta[j] / rse[j]) >= 1.96):
+            lo, hi = _sexp(beta[j] - 1.96 * se[j]), _sexp(beta[j] + 1.96 * se[j])
+            rlo, rhi = _sexp(beta[j] - 1.96 * rse[j]), _sexp(beta[j] + 1.96 * rse[j])
+            flip_ci.append({"factor": nice(nm), "aor": round(_sexp(beta[j]), 2),
+                            "ci_naive": [round(lo, 2), round(hi, 2)],
+                            "ci": [round(rlo, 2), round(rhi, 2)]})
+    ratio = float(np.nanmax(rse[1:] / np.where(se[1:] > 0, se[1:], np.nan))) if k else 1.0
+    add("clustering", "Clients with more than one episode", True,
+        f"{len(y):,} episodes from {n_cl:,} clients. Intervals are clustered on the client"
+        + ("; treating episodes as independent would change no conclusion." if not flip_ci
+           else "; treated as independent, " + "; ".join(
+               f"{f['factor']} would read {f['ci_naive'][0]:.2f}–{f['ci_naive'][1]:.2f} "
+               f"instead of {f['ci'][0]:.2f}–{f['ci'][1]:.2f}" for f in flip_ci) + "."),
+        "Episodes of the same client are not independent, so the confidence intervals and p-values "
+        f"allow for it. Doing so widens them by up to {ratio:.2f} times here.")
+
+    return {"checks": checks, "clustered_changes": flip_ci, "_se": rse,
+            "n_pass": sum(c["status"] == "pass" for c in checks),
+            "n_check": sum(c["status"] == "check" for c in checks)}
 
 
 # variable spec: (col, label, ordered?, reference level, level order, trend subset)
@@ -1848,7 +2068,14 @@ def deep_dive(df: pd.DataFrame) -> dict:
     names.append("_yrs")
     X = np.column_stack(cols)
     yv = cc["_y"].to_numpy()
-    beta, se = _logit_fit(X, yv)
+    beta, cov, converged = _logit_newton(X, yv)
+    se = np.sqrt(np.diag(cov))
+    diagnostics = _model_diagnostics(
+        X, yv, names, beta, cov, converged, cc["_yrs"].to_numpy(),
+        cc["sn"].astype(str).to_numpy() if "sn" in cc else np.arange(len(cc)).astype(str))
+    # Decision 26: adjusted intervals and p-values are clustered on the client,
+    # because a client with several episodes is not several independent people.
+    se = diagnostics.pop("_se")
     aor = {}
     for i, nm in enumerate(names):
         b, s = float(beta[i]), float(se[i])
@@ -1942,7 +2169,7 @@ def deep_dive(df: pd.DataFrame) -> dict:
 
     return {"ok": True, "n_model": int(len(d)), "events": int(d["_y"].sum()),
             "cc_n": int(len(cc)), "resupp_pct": round(d["_y"].mean() * 100, 1),
-            "variables": variables, "cd4": cd4_out}
+            "variables": variables, "cd4": cd4_out, "diagnostics": diagnostics}
 
 
 # ── repeat-unsuppression & DTC-review cohort ──────────────────────────
@@ -1974,12 +2201,18 @@ def dtc_review(df: pd.DataFrame) -> dict:
     # re-suppress and so are not switch candidates at all. The univariate OR
     # analysis below deliberately stays on ALL repeats (`rep`) as a broader
     # descriptive signal - only this headline is the subset.
-    rep_still = rep & still
     switched = df["switched"].fillna(False).astype(bool)
     awaiting = df["awaiting_switch"].fillna(False).astype(bool)
     prior = df.get("prior_switch", pd.Series(False, index=df.index)).fillna(False).astype(bool)
+    # Still >= 1,000 on this episode's follow-up, but the client re-suppressed
+    # on a later episode without a switch: no longer a case for the committee
+    # (Es, 10 Nov 2026). A line list loaded before that date has no such
+    # column, and reads as none.
+    since = df.get("resupp_later", pd.Series(False, index=df.index)).fillna(False).astype(bool)
+    resolved = still & since & ~switched
+    rep_still = rep & still & ~since
     # still >= 1,000, 1st line, not switched, EAC not completed (decision 24)
-    not_done = still & ~awaiting & ~prior & ~switched
+    not_done = still & ~awaiting & ~prior & ~switched & ~resolved
 
     # Outcome of a completed cycle by which cycle it was for the client: a
     # second cycle re-suppresses far less often than a first (Es, 30 Oct 2026).
@@ -2004,7 +2237,8 @@ def dtc_review(df: pd.DataFrame) -> dict:
                       "2nd/3rd line", "1st line"),
         _cd4=_col(df, "cd4_band"),
         _vl=_col(df, "vl_magnitude"),
-        _still=still, _await=awaiting, _switched=switched, _prior=prior, _notdone=not_done)
+        _still=still, _await=awaiting, _switched=switched, _prior=prior, _notdone=not_done,
+        _resolved=resolved)
 
     def rate(a, b):
         return round(a / b * 100, 1) if b else None
@@ -2044,8 +2278,10 @@ def dtc_review(df: pd.DataFrame) -> dict:
             sw = int(g.loc[m, "_switched"].sum())
             pr = int(g.loc[m, "_prior"].sum())
             nd = int(g.loc[m, "_notdone"].sum())
+            rv = int(g.loc[m, "_resolved"].sum())
             out.append({"level": lv, "still": ns, "awaiting": aw, "switched": sw,
-                        "prior": pr, "not_completed": nd, "pct_awaiting": rate(aw, ns)})
+                        "prior": pr, "not_completed": nd, "resolved": rv,
+                        "pct_awaiting": rate(aw, ns)})
         return out
 
     mu = pd.to_numeric(d["months_unsuppressed"], errors="coerce")
@@ -2072,6 +2308,7 @@ def dtc_review(df: pd.DataFrame) -> dict:
             "awaiting": int(awaiting.sum()),
             "prior": int(prior.sum()),
             "not_completed": int(not_done.sum()),
+            "resolved": int(resolved.sum()),
             "dtc_flag": int(dtc.sum()),
         },
         "by_cycle": by_cycle,
@@ -2081,6 +2318,7 @@ def dtc_review(df: pd.DataFrame) -> dict:
             "n_still": int(still.sum()), "awaiting": int(awaiting.sum()),
             "switched": int(switched.sum()), "prior": int(prior.sum()),
             "not_completed": int(not_done.sum()),
+            "resolved": int(resolved.sum()),
             "by_state": gap_by("state", states),
             "by_regimen": gap_by("_reg", ["1st line", "2nd/3rd line"]),
             "by_months": gap_by("_mub", ["<3 mo", "3-6 mo", "6-12 mo", "12+ mo"]),
@@ -2347,7 +2585,11 @@ def vl_trajectory(df: pd.DataFrame, limit: int = 500) -> dict:
     if df.empty or "still_unsuppressed" not in df.columns:
         return {"ok": False, "rows": [], "n": 0}
 
-    d = df[df["still_unsuppressed"].fillna(False).astype(bool)].copy()
+    # ...and has not since re-suppressed on a later episode: that client does
+    # not need a decision, and listing them here asks the committee to review
+    # someone whose latest result is suppressed (Es, 10 Nov 2026).
+    since = df.get("resupp_later", pd.Series(False, index=df.index)).fillna(False).astype(bool)
+    d = df[df["still_unsuppressed"].fillna(False).astype(bool) & ~since].copy()
     if d.empty:
         return {"ok": False, "rows": [], "n": 0}
 

@@ -1,5 +1,5 @@
 import {
-  BookOpen, ChartLine, ClipboardList, FileText, GitCompareArrows, LayoutDashboard,
+  BookOpen, Building2, ChartLine, ClipboardList, FileText, GitCompareArrows, LayoutDashboard,
   ListChecks, ListFilter, Microscope, Settings2, ShieldCheck, Stethoscope, Timer, UserSearch
 } from 'lucide-react'
 import {
@@ -9,9 +9,10 @@ import {
 } from '@/components/ui/sidebar'
 import { useSession } from '@/core/session'
 import BuildLine from '@/shell/BuildLine'
-import { GROUPS, NAV } from '@/shell/nav'
+import { GROUPS, homeFor, navFor } from '@/shell/nav'
 
 const ICONS: Record<string, typeof LayoutDashboard> = {
+  facility: Building2,
   overview: LayoutDashboard,
   cascade: ListFilter,
   deep: Microscope,
@@ -44,14 +45,14 @@ export function AppSidebar({ view, onNavigate, asof, episodes, clients }: {
   clients: string
 }) {
   const { me } = useSession()
-  const items = NAV.filter((n) => !n.adminOnly || me?.role === 'admin')
+  const items = navFor(me)
 
   return (
     <Sidebar collapsible="icon">
       <SidebarHeader className="h-16 justify-center border-b border-sidebar-border">
         <SidebarMenu>
           <SidebarMenuItem>
-            <SidebarMenuButton size="lg" onClick={() => onNavigate('overview')}
+            <SidebarMenuButton size="lg" onClick={() => onNavigate(homeFor(me))}
                                className="hover:bg-transparent active:bg-transparent">
               <div className="flex aspect-square size-8 items-center justify-center rounded-lg bg-primary text-xs font-semibold text-primary-foreground">
                 EC

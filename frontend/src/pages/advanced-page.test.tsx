@@ -56,6 +56,33 @@ describe('Advanced analytics page', () => {
     expect(screen.getAllByRole('img', { name: /adjusted odds ratio/ })).toHaveLength(8)
   })
 
+  it('reports the model checks, and counts the ones that need a closer look', async () => {
+    mock()
+    draw()
+    const card = (await screen.findByText('Model checks: are the assumptions met?')).closest('[data-slot=card]') as HTMLElement
+    expect(within(card).getByText(/All 7 assumption checks are met\./)).toBeInTheDocument()
+    expect(within(card).getAllByRole('listitem')).toHaveLength(8)
+    expect(within(card).getByText(/Clients with more than one episode/)).toHaveTextContent('(Met)')
+    expect(within(card).getByText(/Discrimination/)).toHaveTextContent('(For context)')
+  })
+
+  it('says how many checks need a closer look when any fail', async () => {
+    const d = DD.diagnostics!
+    const checks = d.checks.map((c) => (c.key === 'linearity' ? { ...c, status: 'check' as const } : c))
+    mock(RISK, { ...DD, diagnostics: { checks, n_pass: 6, n_check: 1 } })
+    draw()
+    const card = (await screen.findByText('Model checks: are the assumptions met?')).closest('[data-slot=card]') as HTMLElement
+    expect(within(card).getByText(/6 of 7 assumption checks are met; one needs a closer look\./)).toBeInTheDocument()
+    expect(within(card).getByText(/Linearity of years on ART/)).toHaveTextContent('(Check)')
+  })
+
+  it('leaves the model checks out when an older server sends none', async () => {
+    mock(RISK, { ...DD, diagnostics: undefined })
+    draw()
+    await screen.findByRole('region', { name: 'What moves re-suppression' })
+    expect(screen.queryByText('Model checks: are the assumptions met?')).toBeNull()
+  })
+
   it('says who is not scored, and lists the lowest chance first', async () => {
     mock()
     draw()

@@ -1,5 +1,5 @@
 import type { ChartConfiguration } from 'chart.js'
-import { Gauge, HeartPulse, Percent, Sigma, Users } from 'lucide-react'
+import { CircleCheck, Gauge, HeartPulse, Info, Percent, Sigma, TriangleAlert, Users } from 'lucide-react'
 import { useEffect, useMemo, useState } from 'react'
 import { cn } from 'cn'
 import Chart from '@/components/Chart'
@@ -37,7 +37,10 @@ export interface Variable {
 export interface DeepDive {
   ok: boolean; reason?: string; n_model?: number; resupp_pct?: number; variables?: Variable[]
   cd4?: { coverage_pct: number; n_known: number; levels: { level: string; n: number; resupp: number; rate: number | null }[]; test: string; test_p: number | null } | null
+  diagnostics?: Diagnostics
 }
+export interface DiagnosticCheck { key: string; label: string; result: string; note: string; status: 'pass' | 'check' | 'info' }
+export interface Diagnostics { checks: DiagnosticCheck[]; n_pass: number; n_check: number }
 export interface Risk {
   ok: boolean; reason?: string; auc?: number; baseline?: number; n_train?: number; n_scored?: number
   n_left_care?: number
@@ -136,12 +139,14 @@ function Factors({ dd }: { dd: DeepDive }) {
           <CardDescription>
             Each factor's adjusted odds ratio from one logistic model, holding the others constant.
             Right of the line is more likely to re-suppress, left is less. A whisker that crosses 1
-            is not statistically significant. The scale is logarithmic.
+            is not statistically significant. Intervals allow for clients with more than one
+            episode. The scale is logarithmic.
           </CardDescription>
         </CardHeader>
         <CardContent><Forest eff={eff} /></CardContent>
       </Card>
       <VariableTable dd={dd} />
+      {dd.diagnostics && <DiagnosticsCard d={dd.diagnostics} />}
       {dd.cd4 && <Cd4Card c={dd.cd4} />}
     </section>
   )
@@ -283,6 +288,53 @@ function VariableTable({ dd }: { dd: DeepDive }) {
             </TableBody>
           </Table>
         </div>
+      </CardContent>
+    </Card>
+  )
+}
+
+const CHECK_MARK = {
+  pass: { Icon: CircleCheck, cls: 'text-good', text: 'Met' },
+  check: { Icon: TriangleAlert, cls: 'text-warn', text: 'Check' },
+  info: { Icon: Info, cls: 'text-muted-foreground', text: 'For context' },
+} as const
+
+/**
+ * The model's assumptions, checked on the same fit the page reports (asked at
+ * the CDC session, 4 Nov 2026). The checks describe the estimates above; they
+ * do not change them.
+ */
+export function DiagnosticsCard({ d }: { d: Diagnostics }) {
+  const total = d.n_pass + d.n_check
+  return (
+    <Card className="min-w-0">
+      <CardHeader>
+        <CardTitle>Model checks: are the assumptions met?</CardTitle>
+        <CardDescription>
+          The standard checks for a multivariable logistic regression, run on the model above.{' '}
+          {d.n_check === 0
+            ? `All ${total} assumption checks are met.`
+            : `${d.n_pass} of ${total} assumption checks are met; ${d.n_check === 1 ? 'one needs' : `${d.n_check} need`} a closer look.`}
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="p-0">
+        <ul className="divide-y border-t">
+          {d.checks.map((c) => {
+            const m = CHECK_MARK[c.status]
+            return (
+              <li key={c.key} className="grid gap-1 px-6 py-3 sm:grid-cols-[minmax(0,16rem)_minmax(0,1fr)] sm:gap-6">
+                <span className="flex items-start gap-2 text-sm font-medium">
+                  <m.Icon className={cn('mt-0.5 size-4 shrink-0', m.cls)} aria-hidden />
+                  <span>{c.label}<span className="sr-only"> ({m.text})</span></span>
+                </span>
+                <span className="flex flex-col gap-0.5 text-sm">
+                  <span className="tabular-nums">{c.result}</span>
+                  <span className="text-xs text-muted-foreground">{c.note}</span>
+                </span>
+              </li>
+            )
+          })}
+        </ul>
       </CardContent>
     </Card>
   )
