@@ -658,9 +658,9 @@ def test_version_is_public_and_says_which_build_this_is(client):
     r = client.get("/api/version")
     assert r.status_code == 200
     j = r.json()
-    assert j["version"].count(".") == 1, "VERSION must be MAJOR.MINOR"
-    major, minor = j["version"].split(".")
-    assert major.isdigit() and minor.isdigit()
+    parts = j["version"].split(".")
+    assert len(parts) in (2, 3), "VERSION must be MAJOR.MINOR or MAJOR.MINOR.PATCH"
+    assert all(p.isdigit() for p in parts)
     assert j["label"].startswith(f"v{j['version']}")
     assert isinstance(j["dirty"], bool)
     # The hash of the served dashboard; None only where no React build exists
