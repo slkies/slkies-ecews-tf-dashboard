@@ -126,9 +126,11 @@ export function BulkUsersDialog({ open, onOpenChange, onCreated }: {
 
   return (
     <Dialog open={open} onOpenChange={(o) => { onOpenChange(o); if (!o) reset() }}>
-      <DialogContent className="sm:max-w-4xl">
-        <div className="flex max-h-[80vh] flex-col gap-4">
-          <DialogHeader>
+      {/* The dialog never grows past the window: title and buttons stay put and
+          the middle scrolls, so a long list cannot push "Check the list" out of
+          reach on a laptop screen. */}
+      <DialogContent className="flex max-h-[calc(100dvh-2rem)] flex-col sm:max-w-4xl">
+          <DialogHeader className="shrink-0">
             <DialogTitle>{made ? `${made.length} accounts created` : 'Add several users'}</DialogTitle>
             <DialogDescription>
               {made
@@ -136,7 +138,8 @@ export function BulkUsersDialog({ open, onOpenChange, onCreated }: {
                 : 'Paste one person per line, copied from Excel or a CSV file. Nothing is saved until you have checked the list. The dashboard makes each first password.'}
             </DialogDescription>
           </DialogHeader>
-          {err && <Alert variant="destructive"><AlertDescription>{err}</AlertDescription></Alert>}
+          <div data-testid="bulk-body" className="-mx-4 flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto px-4">
+          {err &&<Alert variant="destructive"><AlertDescription>{err}</AlertDescription></Alert>}
 
           {!made && (
             <div className="flex flex-col gap-1.5">
@@ -150,7 +153,8 @@ export function BulkUsersDialog({ open, onOpenChange, onCreated }: {
                          e.target.value = ''
                        }} />
               </div>
-              <Textarea id="bulk-list" rows={6} spellCheck={false} value={text} className="font-mono text-xs"
+              <Textarea id="bulk-list" rows={6} spellCheck={false} value={text}
+                        className="h-36 resize-y font-mono text-xs field-sizing-fixed"
                         placeholder={'Ada Example\tada@example.org\tViewer\tEkiti\tFacility name as on the dashboard'}
                         onChange={(e) => { setText(e.target.value); setChecked(null) }} />
               <span className="text-xs text-muted-foreground">
@@ -171,7 +175,7 @@ export function BulkUsersDialog({ open, onOpenChange, onCreated }: {
           )}
 
           {shown && (
-            <div className="min-h-0 overflow-auto rounded-lg border">
+            <div className="shrink-0 overflow-x-auto rounded-lg border">
               <Table className="text-xs">
                 <TableHeader className="bg-muted/50">
                   <TableRow className="hover:bg-transparent">
@@ -203,8 +207,9 @@ export function BulkUsersDialog({ open, onOpenChange, onCreated }: {
               </Table>
             </div>
           )}
+          </div>
 
-          <DialogFooter>
+          <DialogFooter className="shrink-0">
             {made ? (
               <>
                 <Button type="button" variant="outline" onClick={copy}><Copy />{copied ? 'Copied' : 'Copy'}</Button>
@@ -220,7 +225,6 @@ export function BulkUsersDialog({ open, onOpenChange, onCreated }: {
               </>
             )}
           </DialogFooter>
-        </div>
       </DialogContent>
     </Dialog>
   )
