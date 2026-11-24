@@ -32,6 +32,15 @@ try {
 const json = (b: unknown) => new Response(JSON.stringify(b), { status: 200, headers: { 'Content-Type': 'application/json' } })
 window.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
   const url = String(input)
+  if (url.includes('/api/users/bulk')) {
+    const body = JSON.parse(String(init?.body ?? '{}')) as { users: { full_name: string; email: string; role: string; scope_state: string; scope_facility: string }[]; dry_run: boolean }
+    const rows = body.users.map((u, i) => ({
+      row: i + 1, email: u.email, username: u.email.split('@')[0], full_name: u.full_name, role: (u.role || 'viewer').toLowerCase(),
+      scope_state: u.scope_state || null, scope_facility: u.scope_facility || null, errors: [],
+      ...(body.dry_run ? {} : { password: `Hx${String(i + 1).padStart(2, '0')}harnessPw7` }),
+    }))
+    return json({ ok: true, created: body.dry_run ? 0 : rows.length, errors: 0, rows })
+  }
   if (init?.method && init.method !== 'GET') {
     return json({ ok: true, deleted: 2, cohort: 4700, upload_id: 10, primary_eac_sheet: 'EAC_Oct', warnings: [], sheets: [] })
   }

@@ -76,8 +76,21 @@ def test_nothing_at_all_is_unknown_not_a_crash(monkeypatch, no_git):
     assert info["version"]          # still reads app/VERSION
 
 
-def test_version_file_is_major_minor():
-    """bump_version.py and the whole scheme assume exactly two parts."""
+def test_version_file_is_major_minor_or_a_patch_on_it():
+    """bump_version.py reads MAJOR.MINOR, or MAJOR.MINOR.PATCH after a patch."""
     raw = V._read_version_file()
-    major, _, minor = raw.partition(".")
-    assert major.isdigit() and minor.isdigit(), raw
+    parts = raw.split(".")
+    assert len(parts) in (2, 3) and all(p.isdigit() for p in parts), raw
+
+
+def test_a_patch_adds_a_third_part_that_the_next_minor_drops():
+    import importlib.util
+    from pathlib import Path
+    path = Path(__file__).resolve().parent.parent / "scripts" / "bump_version.py"
+    spec = importlib.util.spec_from_file_location("bump_version", path)
+    bv = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(bv)
+    assert bv.label(*bv.bumped((2, 3, 0), "patch")) == "2.3.1"
+    assert bv.label(*bv.bumped((2, 3, 1), "patch")) == "2.3.2"
+    assert bv.label(*bv.bumped((2, 3, 1), "minor")) == "2.4"
+    assert bv.label(*bv.bumped((2, 3, 1), "major")) == "3.0"
