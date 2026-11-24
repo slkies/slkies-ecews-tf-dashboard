@@ -1,7 +1,8 @@
 """Cut a release: bump app/VERSION, commit it, and tag it in git.
 
-    python bump_version.py minor      1.0 -> 1.1
+    python bump_version.py minor      1.0 -> 1.1   (2.3.1 -> 2.4)
     python bump_version.py major      1.4 -> 2.0
+    python bump_version.py patch      2.3 -> 2.3.1 (2.3.1 -> 2.3.2)
     python bump_version.py --show     what is the current version?
 
 What the two numbers mean here, so the choice is not a matter of taste:
@@ -14,6 +15,11 @@ What the two numbers mean here, so the choice is not a matter of taste:
             A new definition of an indicator, a different cohort rule, a page
             that moves or disappears, a change to what an export contains.
             If a state team's briefing note would now be wrong, it is major.
+
+    PATCH   A fix to something just released that changes nothing anyone
+            reads: a button out of reach, a dialog that does not fit. No
+            figure moves and nothing new appears. The third part is dropped
+            again at the next minor or major release.
 
 The rule of thumb: minor means "look at the new thing", major means "check what
 you thought you knew".
@@ -40,29 +46,47 @@ def git(*args: str, check: bool = True) -> str:
     return r.stdout.strip()
 
 
-def read() -> tuple[int, int]:
+def read() -> tuple[int, int, int]:
     raw = VERSION_FILE.read_text(encoding="utf-8").strip()
+    parts = raw.split(".")
     try:
-        major, minor = (int(p) for p in raw.split("."))
+        if len(parts) not in (2, 3):
+            raise ValueError
+        major, minor, patch = (int(p) for p in (parts + ["0"])[:3])
     except ValueError:
-        raise SystemExit(f"{VERSION_FILE} should hold MAJOR.MINOR, not {raw!r}")
-    return major, minor
+        raise SystemExit(f"{VERSION_FILE} should hold MAJOR.MINOR or "
+                         f"MAJOR.MINOR.PATCH, not {raw!r}")
+    return major, minor, patch
+
+
+def label(major: int, minor: int, patch: int) -> str:
+    """2.3 for a minor or major release, 2.3.1 for a patch on it."""
+    return f"{major}.{minor}.{patch}" if patch else f"{major}.{minor}"
+
+
+def bumped(cur: tuple[int, int, int], part: str) -> tuple[int, int, int]:
+    major, minor, patch = cur
+    if part == "major":
+        return major + 1, 0, 0
+    if part == "minor":
+        return major, minor + 1, 0
+    return major, minor, patch + 1
 
 
 def main() -> int:
     ap = argparse.ArgumentParser(
         description=__doc__,
         formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("part", nargs="?", choices=("major", "minor"))
+    ap.add_argument("part", nargs="?", choices=("major", "minor", "patch"))
     ap.add_argument("--show", action="store_true",
                     help="print the current version and exit")
     ap.add_argument("--dry-run", action="store_true",
                     help="say what would happen, change nothing")
     a = ap.parse_args()
 
-    major, minor = read()
+    cur = read()
     if a.show or not a.part:
-        print(f"  current version : {major}.{minor}")
+        print(f"  current version : {label(*cur)}")
         tag = git("describe", "--tags", "--abbrev=0", check=False)
         if tag:
             n = git("rev-list", "--count", f"{tag}..HEAD", check=False)
@@ -82,17 +106,17 @@ def main() -> int:
             "first - a release tag must point at something everyone can "
             "check out.\n" + dirty)
 
-    new = (major + 1, 0) if a.part == "major" else (major, minor + 1)
-    tag = f"v{new[0]}.{new[1]}"
+    new = bumped(cur, a.part)
+    tag = f"v{label(*new)}"
     if git("tag", "--list", tag):
         raise SystemExit(f"{tag} already exists.")
 
-    print(f"  {major}.{minor}  ->  {new[0]}.{new[1]}   (tag {tag})")
+    print(f"  {label(*cur)}  ->  {label(*new)}   (tag {tag})")
     if a.dry_run:
         print("  dry run - nothing written")
         return 0
 
-    VERSION_FILE.write_text(f"{new[0]}.{new[1]}\n", encoding="utf-8")
+    VERSION_FILE.write_text(f"{label(*new)}\n", encoding="utf-8")
     git("add", str(VERSION_FILE))
     git("commit", "-m", f"release: {tag}")
     git("tag", "-a", tag, "-m", f"Release {tag}")

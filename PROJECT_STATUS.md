@@ -1,6 +1,6 @@
 # ECEWS TF Monitor — Project Status & Handoff
 
-**Last updated:** 19 Nov 2026
+**Last updated:** 24 Nov 2026
 **Owner:** Es (Data Analytics Lead, ECEWS / SPEED Program — PEPFAR/CDC, Nigeria)
 **Purpose:** Online, multi-user web app for HIV ART **treatment-failure (TF)** and
 **EAC** monitoring across Delta, Osun, Ekiti. An admin loads the de-identified line
@@ -19,6 +19,11 @@ repo is public. Credentials live in `.env` (gitignored) or the host's secret sto
 ---
 
 ## 1. Where things run
+
+**Version 2.3.1** (24 Nov 2026): fix only. Add several no longer pushes its buttons
+off a laptop screen when a long list is pasted: the list box scrolls inside itself
+and the dialog fits the window. Versions may now take a third part for a fix like
+this (`bump_version.py patch`); nothing needs reloading.
 
 **Version 2.3** (19 Nov 2026), from the CDC special session of 4 Nov and after: the
 header shows the age of the current line list; every rule on the Guidelines page
