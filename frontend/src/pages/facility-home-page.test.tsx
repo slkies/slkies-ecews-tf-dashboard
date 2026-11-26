@@ -3,6 +3,7 @@ import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { FilterProvider } from '@/core/filters'
 import { SessionProvider } from '@/core/session'
+import type { Overview } from '@/core/overview'
 import FacilityHomePage from './facility-home-page'
 
 const ME = { username: 'f', email: 'f@x', name: 'F', role: 'viewer', scope_state: 'Delta', scope_facility: 'Delta Facility A' }
@@ -42,29 +43,51 @@ function serve(counts: Record<string, number>, rows = [row('a', 3), row('b', 14)
 beforeEach(() => { sessionStorage.setItem('ecews.session', 'token') })
 afterEach(() => { vi.unstubAllGlobals(); sessionStorage.clear() })
 
-const draw = (onOpen = vi.fn()) => {
-  render(<SessionProvider><FilterProvider><FacilityHomePage onOpenWorklist={onOpen} /></FilterProvider></SessionProvider>)
+// Only the fields the headline cards read; the shell passes the real payload.
+const OV = {
+  n: 120, clients: 110, in_care: 100, left_care_untested: 20, eac1: 80, eac1_pct: 80, never_eac: 20,
+  completed: 60, completed_pct: 75, post_eac_vl: 50, retested: 70, retest_pct: 70, awaiting_retest: 30,
+  resuppressed: 40, resupp_pct: 57.1, awaiting_switch: 6, still_unsuppressed: 30, prior_switch: 2,
+  switched: 3, switch_eligible: 25,
+} as unknown as Overview
+
+const draw = (onOpen = vi.fn(), overview: Overview | null = OV) => {
+  render(<SessionProvider><FilterProvider>
+    <FacilityHomePage onOpenWorklist={onOpen} overview={overview} />
+  </FilterProvider></SessionProvider>)
   return onOpen
 }
 
 describe('Facility home', () => {
-  it('names the facility and lists only the action lists with clients, most urgent first', async () => {
-    serve({ eac_incomplete: 4, awaiting_switch: 2, no_eac: 0, trunc_mid: 9 })
+  it('names the facility and shows the Overview headline cards, with no action list', async () => {
+    serve({ eac_incomplete: 4, awaiting_switch: 2 })
     draw()
     expect(await screen.findByRole('heading', { name: 'Delta Facility A' })).toBeInTheDocument()
-    const card = (await screen.findByText('Needs action')).closest('[data-slot=card]') as HTMLElement
-    const items = within(card).getAllByRole('button')
-    expect(items.map((b) => b.textContent)).toEqual([
-      expect.stringContaining('awaiting DTC review'), expect.stringContaining('Started EAC but not completed')])
-    expect(within(card).queryByText(/Follow-up sample taken during EAC/)).toBeNull()   // a data check, not action
-    expect(within(card).getByText('7 other lists are empty.')).toBeInTheDocument()
+    const kpis = screen.getByRole('region', { name: 'Headline indicators' })
+    for (const t of ['Index cohort', 'Commenced EAC', 'Completed EAC', 'Re-suppressed', 'Awaiting DTC review'])
+      expect(within(kpis).getByText(t)).toBeInTheDocument()
+    expect(screen.queryByText('Needs action')).toBeNull()
   })
 
-  it('opens the list a row names', async () => {
-    serve({ eac_incomplete: 4 })
-    const onOpen = draw()
-    await userEvent.click(await screen.findByRole('button', { name: /Started EAC but not completed/ }))
-    expect(onOpen).toHaveBeenCalledWith('eac_incomplete')
+  it('runs filters, headline cards, cascade, then the rest, in that order', async () => {
+    serve({ eac_incomplete: 3 })
+    draw()
+    const cascade = await screen.findByRole('heading', { name: 'The treatment failure cascade' })
+    const kpis = screen.getByRole('region', { name: 'Headline indicators' })
+    const filters = screen.getByText('Fiscal year')
+    const dq = screen.getByText('Data quality at this facility')
+    const longest = await screen.findByText(/Longest unsuppressed/)
+    const after = (x: Element, y: Element) => !!(x.compareDocumentPosition(y) & Node.DOCUMENT_POSITION_FOLLOWING)
+    expect(after(filters, kpis)).toBe(true)
+    expect(after(kpis, cascade)).toBe(true)
+    expect(after(cascade, longest)).toBe(true)
+    expect(after(longest, dq)).toBe(true)
+  })
+
+  it('says so when the filters select no episodes', async () => {
+    serve({})
+    draw(vi.fn(), { ...OV, n: 0 } as Overview)
+    expect(await screen.findByText('No episodes match these filters.')).toBeInTheDocument()
   })
 
   it('shows the longest-unsuppressed clients from the most urgent list that has any', async () => {
@@ -76,17 +99,17 @@ describe('Facility home', () => {
     expect(months).toEqual(['14 months', '9 months', '3 months'])
   })
 
-  it('says plainly when nothing is overdue', async () => {
+  it('shows no longest-unsuppressed card when no urgent list has clients', async () => {
     serve({})
     draw()
-    expect(await screen.findByText('No client is on any action list. Nothing is overdue.')).toBeInTheDocument()
+    await screen.findByRole('heading', { name: 'The treatment failure cascade' })
     expect(screen.queryByText(/Longest unsuppressed/)).toBeNull()
   })
 
   it('offers only the filters that mean something inside one facility', async () => {
     serve({})
     draw()
-    await screen.findByText('Needs action')
+    await screen.findByRole('heading', { name: 'Delta Facility A' })
     for (const f of ['Fiscal year', 'Month', 'LGA (residence)', 'Age band', 'Treatment plan']) expect(screen.getByText(f)).toBeInTheDocument()
     for (const f of ['State', 'LGA (service)', 'Facility']) expect(screen.queryByText(f, { exact: true })).toBeNull()
   })

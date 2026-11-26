@@ -560,3 +560,37 @@ not switched; *Unsuppressed for more than 6 months* counts from the index date
 whether or not the episode re-suppressed; and the follow-up VL is linked in sample
 order while EAC cycles are matched in result-date order (6 clients' episodes sort
 differently under the two, and 66 have two episodes sharing one sample date).
+
+## 28. EAC begun on a soft copy of the result still counts
+**26 Nov 2026** — A soft copy of a result can reach the adherence counsellor before
+the data assistant enters it in the EMR. If EAC starts in between, session 1 predates
+the recorded result date and the episode read as *EAC predates the index VL*, not
+commenced (Es).
+
+**Rule.** Session 1 counts for an episode from the later of its sample date and 30
+days before its result date. It never counts before the sample: counselling cannot
+respond to a sample not yet taken. The same boundary closes the previous episode's
+window, so such a cycle belongs to the new result and is not counted twice. An
+accepted early start has a time to EAC of 0 days, not a negative one. Without a
+usable sample date there is no allowance.
+
+On the 21 Nov line list this moves 5 cycles, all in Ekiti, from a client's earlier
+episode to the result that followed it. Commenced EAC is unchanged in total (4,153
+of 5,089 episodes): the cycle began after the new sample, so it was never the earlier
+episode's counselling before its repeat VL. 7 session 1 dates fall within 30 days
+before a result; 2 predate the sample and stay with the earlier cycle.
+
+**Each episode on its own EAC (confirmed, Es).** Every unsuppressed result is its own
+episode, and it counts as commenced when it has its own session 1, whichever episode
+it is. Where a client had no EAC after a first result and began EAC only after the
+next high result, the NEWER episode counts as commenced (and its outcome follows its
+own follow-up VL); the EARLIER episode does not, because no counselling followed it.
+The later cycle is never copied back onto it. On 21 Nov that earlier-episode pattern
+is 250 episodes in care (crediting them would have moved commenced from 81.8% to
+87.1%); it accounts for the 27 Osun FY26Q1-Q2 episodes counted differently by version
+2.1. Sessions held for those earlier results are being entered from the backlog and
+will count when recorded. No label is added to those episodes.
+
+Facility home, same day (Es): the filters, then the Overview's headline KPI cards,
+then the cascade, then the longest-unsuppressed clients, data quality and feedback.
+The *Needs action* card was removed; the Worklists page holds those lists.

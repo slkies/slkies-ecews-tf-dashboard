@@ -115,7 +115,8 @@ export default function OverviewPage({ data, times, trend, loading }: {
 
 /* ───────────────────────────────── headline tiles ─────────────────────────── */
 
-function Headline({ data, trend, since }: { data: Ov; trend: Trend | null; since?: string }) {
+/** The headline KPI cards. Facility home shows the same cards for its facility. */
+export function Headline({ data, trend, since }: { data: Ov; trend: Trend | null; since?: string }) {
   const postEacPct = data.completed ? (data.post_eac_vl / data.completed) * 100 : null
   const badge = (t: [Tone, string] | null) => t && <StatusBadge tone={t[0]}>{t[1]}</StatusBadge>
   const tv = trend?.values

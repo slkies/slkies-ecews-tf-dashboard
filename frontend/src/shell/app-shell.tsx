@@ -135,7 +135,7 @@ export default function AppShell() {
           <div className={clientSn ? 'hidden' : 'contents'}>
           {shown === 'facility' ? (
             <ErrorBoundary name="Facility home">
-              <FacilityHomePage onOpenWorklist={openWorklist} />
+              <FacilityHomePage onOpenWorklist={openWorklist} overview={overview} trend={trend} loading={loading} />
             </ErrorBoundary>
           ) : shown === 'overview' ? (
             <ErrorBoundary name="Overview">

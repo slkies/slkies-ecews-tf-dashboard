@@ -53,6 +53,25 @@ LLV_HIGH_RISK = 200     # 200-999 -> recommend switch (spec §1.4)
 EAC_MIN_SESSIONS = 3    # spec §1.3
 EAC_COMPLETE_DAYS = 30  # completed = sessions 1-3 plus >=30 days since session 3
 EAC_EXTENDED_MAX_DAYS = 60  # session 4 within this many days of session 3 = extended (Es, 30 Oct 2026)
+# A soft copy of a result can reach the adherence counsellor before the data
+# assistant enters it in the EMR, so session 1 may predate the recorded result
+# date. It still counts for that result if it is within this many days before
+# it AND on or after the sample date (decision 28, Es, 26 Nov 2026).
+EAC_EARLY_START_DAYS = 30
+
+
+def eac_floor(idx_date, idx_samp):
+    """The earliest session 1 that counts as counselling for this result.
+
+    The later of the sample date and EAC_EARLY_START_DAYS before the result.
+    Without a usable sample date (missing, or after the result) there is no
+    allowance and the result date itself is the floor.
+    """
+    r = pd.to_datetime(pd.Series(idx_date), errors="coerce")
+    s = pd.to_datetime(pd.Series(idx_samp), errors="coerce")
+    early = r - pd.Timedelta(days=EAC_EARLY_START_DAYS)
+    ok = s.notna() & r.notna() & (s <= r)
+    return r.where(~ok, np.maximum(s, early))
 VISIT_WINDOW_DAYS = 60      # a scheduled visit this soon after EAC completion: VL likely drawn then
 
 # Socio-demographic level collapsing. Source values are lower-cased/stripped
@@ -275,16 +294,21 @@ def _eac_for_episodes(base: pd.DataFrame, e: pd.DataFrame, cols: list[str]) -> p
     client_cols = [c for c in cols if c not in _CYCLE_COLS and c != "sn"]
     cycle_cols = [c for c in cols if c in _CYCLE_COLS]
 
+    # The window opens at eac_floor (decision 28): a session 1 up to 30 days
+    # before the result, if after the sample, belongs to this result - and so
+    # closes the previous episode's window, which then cannot also claim it.
+    samp = base["idx_samp"] if "idx_samp" in base else pd.Series(pd.NaT, index=base.index)
     ep = pd.DataFrame({"sn": base["sn"].to_numpy(), "idx_date": base["idx_date"].to_numpy(),
+                       "_from": eac_floor(base["idx_date"], samp).to_numpy(),
                        "_ep": np.arange(len(base))})
     ep = ep.sort_values(["sn", "idx_date"])
-    ep["_next"] = ep.groupby("sn")["idx_date"].shift(-1)
+    ep["_next"] = ep.groupby("sn")["_from"].shift(-1)
 
     cyc = e[e["Session_1_Date"].notna()].drop_duplicates(["sn", "Session_1_Date"])[["sn", *cycle_cols]]
     m = ep.merge(cyc, on="sn", how="inner")
     s1 = m["Session_1_Date"]
-    inwin = (s1 >= m["idx_date"]) & (m["_next"].isna() | (s1 < m["_next"]))
-    before = s1 < m["idx_date"]
+    inwin = (s1 >= m["_from"]) & (m["_next"].isna() | (s1 < m["_next"]))
+    before = s1 < m["_from"]
     m = m[(inwin | before).fillna(False)].copy()
     s1i = m["Session_1_Date"].astype("int64")
     w = inwin.loc[m.index].fillna(False).to_numpy()
@@ -626,9 +650,14 @@ def build_cohort(
     # An EAC session dated BEFORE the index VL belongs to an earlier cycle. It
     # is not this episode's counselling. Those episodes are NOT excluded from
     # the cohort - they count as "no EAC on record yet", which is what they are.
+    # The one exception is a session 1 within EAC_EARLY_START_DAYS before the
+    # result and after the sample (decision 28): a soft copy reached the
+    # counsellor before the EMR was updated, so it is this result's EAC.
     s1 = df["Session_1_Date"]
-    df["eac_valid"] = (s1.notna() & (s1 >= df["idx_date"])).fillna(False).astype(bool)
-    df["eac_prior_cycle"] = (s1.notna() & (s1 < df["idx_date"])).fillna(False).astype(bool)
+    floor = eac_floor(df["idx_date"], df["idx_samp"]).set_axis(df.index)
+    df["eac_valid"] = (s1.notna() & (s1 >= floor)).fillna(False).astype(bool)
+    df["eac_prior_cycle"] = (s1.notna() & (s1 < floor)).fillna(False).astype(bool)
+    df["eac_early_start"] = (df["eac_valid"] & (s1 < df["idx_date"])).fillna(False).astype(bool)
     n_prior = int(df["eac_prior_cycle"].sum())
     if n_prior:
         warn.append(
@@ -637,11 +666,17 @@ def build_cohort(
         )
 
     # §5: negative time-to-EAC is a data error, never a real value
+    # An accepted early start (decision 28) counts as day 0, not a negative lag.
     raw_lag = (s1 - df["idx_date"]).dt.days
-    df["time_to_eac"] = raw_lag.where(raw_lag >= 0)
-    n_neg = int((raw_lag < 0).sum())
+    df["time_to_eac"] = raw_lag.where(raw_lag >= 0).where(~df["eac_early_start"], 0)
+    n_neg = int(((raw_lag < 0) & ~df["eac_early_start"]).sum())
     if n_neg:
         warn.append(f"{n_neg} negative time-to-EAC values excluded (spec §5).")
+    n_early = int(df["eac_early_start"].sum())
+    if n_early:
+        warn.append(
+            f"{n_early} episodes have EAC session 1 up to {EAC_EARLY_START_DAYS} days before the "
+            f"recorded result date but after the sample. Counted as commenced (decision 28).")
 
     # --- §4: EAC cascade flags -------------------------------------------
     v = df["eac_valid"]
