@@ -1,14 +1,15 @@
 /**
  * The page a facility account lands on (CDC session, 4 Nov 2026: "facilities
  * will see a module specific to them"; the full dashboard was called too busy
- * for facility staff). Top to bottom: what needs doing this week, the full
- * cascade, the facility's own data-quality findings, and a way to tell the team.
+ * for facility staff). Top to bottom (Es, 26 Nov 2026): the filters, the same
+ * headline KPI cards as the Overview, the full cascade, then the clients waiting
+ * longest, the facility's own data-quality findings and a way to tell the team.
+ * The "Needs action" list was removed: the Worklists page already holds it.
  *
  * The server already limits a facility account to its own rows, so the filters
  * here only narrow within the facility, and state, LGA of service and facility
  * are not offered.
  */
-import { ChevronRight } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { FeedbackForm } from '@/components/account-dialogs'
 import { ClientKey } from '@/components/client-record'
@@ -22,10 +23,13 @@ import { Skeleton } from '@/components/ui/skeleton'
 import { api } from '@/core/api'
 import { useFilters, type FilterKey } from '@/core/filters'
 import { DASH, fmt, fmtDate } from '@/core/format'
+import type { Overview as Ov } from '@/core/overview'
+import type { Trend } from '@/core/use-trend'
 import { useSession } from '@/core/session'
 import CascadePage from '@/pages/cascade-page'
+import { Headline } from '@/pages/overview-page'
 import { SEVERITY_RANK, SeverityMark, type DqRow } from '@/pages/data-quality-page'
-import { PriorityMark, WORKLISTS, type ClientRow } from '@/pages/worklists-page'
+import { WORKLISTS, type ClientRow } from '@/pages/worklists-page'
 
 /** The filters that still mean something inside one facility. */
 export const FACILITY_FILTERS: FilterKey[] = ['fy', 'quarter', 'month', 'lga_res', 'sex', 'age_band', 'plan']
@@ -38,7 +42,12 @@ const NEEDS_ACTION = WORKLISTS.filter((w) => w.group === 'Needs action')
 const URGENT = NEEDS_ACTION.filter((w) => w.priority === 'High' || w.priority === 'Medium')
 const SHOW_CLIENTS = 5
 
-export default function FacilityHomePage({ onOpenWorklist }: { onOpenWorklist: (flag: string) => void }) {
+export default function FacilityHomePage({ onOpenWorklist, overview = null, trend = null, loading = false }: {
+  onOpenWorklist: (flag: string) => void
+  overview?: Ov | null
+  trend?: Trend | null
+  loading?: boolean
+}) {
   const { me } = useSession()
   const { query, options } = useFilters()
   const [counts, setCounts] = useState<Counts[] | null>(null)
@@ -76,8 +85,6 @@ export default function FacilityHomePage({ onOpenWorklist }: { onOpenWorklist: (
     return () => { off = true }
   }, [first, longestKey, query])
 
-  const onList = NEEDS_ACTION.filter((w) => n(w.flag) > 0)
-  const empty = NEEDS_ACTION.length - onList.length
   const findings = (dq ?? []).filter((r) => r.n_records > 0)
     .sort((a, b) => (SEVERITY_RANK[a.severity] ?? 9) - (SEVERITY_RANK[b.severity] ?? 9) || b.n_records - a.n_records)
 
@@ -88,8 +95,9 @@ export default function FacilityHomePage({ onOpenWorklist }: { onOpenWorklist: (
           <span className="text-[11px] font-medium tracking-[0.08em] text-muted-foreground uppercase">Facility home</span>
           <h1 className="text-2xl font-bold tracking-tight text-balance">{me?.scope_facility ?? 'Your facility'}</h1>
           <p className="max-w-3xl text-sm text-muted-foreground">
-            What needs doing at this facility, the cascade from an unsuppressed result to its outcome,
-            and the records to correct. Everything follows the filters below.
+            This facility's headline figures, the cascade from an unsuppressed result to its outcome,
+            the clients waiting longest and the records to correct. Everything follows the filters
+            below; the client lists are on the Worklists page.
           </p>
         </div>
         <PinFiltersToggle />
@@ -98,41 +106,24 @@ export default function FacilityHomePage({ onOpenWorklist }: { onOpenWorklist: (
       <FilterBar fields={FACILITY_FILTERS} />
       {err && <Alert variant="destructive"><AlertDescription>{err}</AlertDescription></Alert>}
 
-      <Card className="min-w-0">
-        <CardHeader>
-          <CardTitle>Needs action</CardTitle>
-          <CardDescription>
-            {counts === null ? 'Loading the lists.'
-              : onList.length === 0 ? 'No client is on any action list. Nothing is overdue.'
-              : `${onList.length} of ${NEEDS_ACTION.length} lists have clients on them, most urgent first.`}
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="p-0">
-          {counts === null ? <div className="px-6 pb-6"><Skeleton className="h-40 w-full" /></div> : (
-            <ul className="divide-y border-t">
-              {onList.map((w) => (
-                <li key={w.flag}>
-                  <button type="button" onClick={() => onOpenWorklist(w.flag)}
-                          className="grid w-full grid-cols-[4.5rem_minmax(0,1fr)_auto_auto] items-center gap-3 px-6 py-3 text-left hover:bg-muted/50 focus-visible:bg-muted/50 focus-visible:outline-none">
-                    <PriorityMark priority={w.priority} />
-                    <span className="flex min-w-0 flex-col gap-0.5">
-                      <span className="text-sm font-medium">{w.label}</span>
-                      <span className="text-xs text-muted-foreground">{w.next}</span>
-                    </span>
-                    <span className="text-lg font-semibold tabular-nums">{fmt(n(w.flag))}</span>
-                    <ChevronRight className="size-4 text-muted-foreground" aria-hidden />
-                  </button>
-                </li>
-              ))}
-              {empty > 0 && onList.length > 0 && (
-                <li className="px-6 py-3 text-xs text-muted-foreground">
-                  {empty === 1 ? 'One other list is' : `${empty} other lists are`} empty.
-                </li>
-              )}
-            </ul>
-          )}
-        </CardContent>
-      </Card>
+      {overview === null
+        ? (loading ? <Skeleton className="h-64 w-full" /> : null)
+        : overview.n > 0
+          ? <div className={loading ? 'opacity-60 transition-opacity' : 'transition-opacity'} aria-busy={loading}>
+              <Headline data={overview} trend={trend} since={trend ? fmtDate(trend.prevAsOf) : undefined} />
+            </div>
+          : <Alert><AlertDescription>No episodes match these filters.</AlertDescription></Alert>}
+
+      <section aria-labelledby="facility-cascade" className="flex flex-col gap-4">
+        <div className="flex flex-col gap-1">
+          <h2 id="facility-cascade" className="text-xl font-semibold tracking-tight">The treatment failure cascade</h2>
+          <p className="max-w-3xl text-sm text-muted-foreground">
+            From an unsuppressed viral load through EAC, the follow-up viral load and its outcome.
+            Where a worklist holds the clients in a gap, open it from the step.
+          </p>
+        </div>
+        <CascadePage embedded onOpenWorklist={onOpenWorklist} />
+      </section>
 
       {first && longest?.key === longestKey && longest.rows.length > 0 && (
         <Card className="min-w-0">
@@ -164,17 +155,6 @@ export default function FacilityHomePage({ onOpenWorklist }: { onOpenWorklist: (
           </CardContent>
         </Card>
       )}
-
-      <section aria-labelledby="facility-cascade" className="flex flex-col gap-4">
-        <div className="flex flex-col gap-1">
-          <h2 id="facility-cascade" className="text-xl font-semibold tracking-tight">The treatment failure cascade</h2>
-          <p className="max-w-3xl text-sm text-muted-foreground">
-            From an unsuppressed viral load through EAC, the follow-up viral load and its outcome.
-            Where a worklist holds the clients in a gap, open it from the step.
-          </p>
-        </div>
-        <CascadePage embedded onOpenWorklist={onOpenWorklist} />
-      </section>
 
       <Card className="min-w-0">
         <CardHeader>

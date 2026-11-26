@@ -1,6 +1,6 @@
 # ECEWS TF Monitor — Project Status & Handoff
 
-**Last updated:** 24 Nov 2026
+**Last updated:** 26 Nov 2026
 **Owner:** Es (Data Analytics Lead, ECEWS / SPEED Program — PEPFAR/CDC, Nigeria)
 **Purpose:** Online, multi-user web app for HIV ART **treatment-failure (TF)** and
 **EAC** monitoring across Delta, Osun, Ekiti. An admin loads the de-identified line
@@ -19,6 +19,13 @@ repo is public. Credentials live in `.env` (gitignored) or the host's secret sto
 ---
 
 ## 1. Where things run
+
+**Version 2.4** (26 Nov 2026): EAC begun on a soft copy of a result, up to 30 days
+before the recorded result date and after the sample, counts for that result
+(decision 28); each episode counts as commenced on its own session 1. Facility home
+now shows the filters, the Overview's headline KPI cards, then the cascade; the Needs
+action card was removed (the Worklists page holds it). **The line list must be loaded
+again after deploying 2.4**: EAC cycles are matched at load time.
 
 **Version 2.3.1** (24 Nov 2026): fix only. Add several no longer pushes its buttons
 off a laptop screen when a long list is pasted: the list box scrolls inside itself
@@ -224,7 +231,7 @@ client: standard errors widen by up to 1.20 times, and male sex reads 0.79
 ```
 ├── PROJECT_STATUS.md                 ← this file
 ├── EAC_Indicator_Definitions_and_Data_Analysis_Plan_v3_1.md   ← the spec
-├── docs/DECISIONS_AND_INCIDENTS.md   ← standing rules, decisions 1–27
+├── docs/DECISIONS_AND_INCIDENTS.md   ← standing rules, decisions 1–28
 ├── TECHNICAL_DOSSIER.md              ← architecture, data flow and security, for IT review
 ├── docs/RUNBOOK_pipeline.md          ← the weekly de-identification routine
 ├── docker-compose.yml, .env.example, DEPLOY.md

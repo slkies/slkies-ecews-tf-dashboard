@@ -56,6 +56,14 @@ window.fetch = async (input: RequestInfo | URL) => {
   if (url.includes('/api/version')) return json({ version: '2.0', commit: 'harness', dirty: true, label: 'v2.0+' })
   if (url.includes('/api/filters')) return json({ states: ['Delta', 'Osun'], lgas: [], lga_res: [], facilities: ['Delta Facility A'], age_bands: [], quarters: [], fys: [], months: [], plans: [], lga_state: {}, facility_state: {} })
   if (url.includes('/api/summary')) return json({ n: ROWS.length, clients: ROWS.length, as_of: '2026-10-16' })
+  // Made-up headline figures, for the KPI cards on the Overview and Facility home.
+  if (url.includes('/api/overview')) return json({
+    n: 120, clients: 112, repeats: 8, in_care: 108, left_care_untested: 12, eac1: 90, eac1_pct: 83.3, never_eac: 18,
+    completed: 70, completed_pct: 77.8, post_eac_vl: 62, retested: 96, retest_pct: 88.9, awaiting_retest: 12,
+    fu_sampled: 99, fu_sample_pct: 91.7, resuppressed: 70, resupp_pct: 72.9, awaiting_switch: 9,
+    still_unsuppressed: 26, resolved_later: 4, prior_switch: 2, switched: 3, switch_eligible: 24, switch_pct: 12.5,
+    as_of: '2026-10-16', warnings: [],
+  })
   if (url.includes('/api/worklists')) return json(WORKLISTS.map((w) => ({ flag: w.flag, n: w.flag === 'eac_incomplete' ? ROWS.length : 0 })))
   if (url.includes('/api/clients')) return json(ROWS)
   if (url.includes('/api/client-search')) return json({ n: MATCHES.length, shown: MATCHES.length, limit: 50, clients: MATCHES })

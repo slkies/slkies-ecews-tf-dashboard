@@ -969,3 +969,45 @@ def test_a_second_cycle_that_also_fails_keeps_the_client_on_the_dtc_list():
     assert d["awaiting_switch"].tolist() == [True, True]
     assert dtc_review(d)["summary"]["resolved"] == 0
     assert vl_trajectory(d)["n"] == 2
+
+
+# ── decision 28: EAC begun on a soft copy, before the result reached the EMR ──
+def _soft_copy(s1, samp="2026-03-01", result="2026-03-20"):
+    sn = "0.282828282828"
+    tu = pd.DataFrame([{"S/N": sn, "currentViralLoad": 8000, "dateofCurrentViralLoad": result,
+                        "lastDateOfSampleCollection": samp, "dateResultReceivedFacility": result}])
+    eac = pd.DataFrame([mk(**{"S/N": sn}, Session_1_Date=s1)])
+    return build_cohort(tu, treat(sn=sn), eac, as_of=pd.Timestamp("2026-10-31"), mode="snapshot").df.iloc[0]
+
+
+def test_eac_started_on_a_soft_copy_before_the_recorded_result_counts():
+    r = _soft_copy("2026-03-10")              # 10 days before the result, after the sample
+    assert bool(r["eac1"]) and not bool(r["eac_prior_cycle"])
+    assert r["time_to_eac"] == 0              # day 0, never a negative lag
+
+
+def test_eac_before_the_sample_was_taken_is_an_earlier_cycle():
+    r = _soft_copy("2026-02-25")              # within 30 days of the result, but before the sample
+    assert not bool(r["eac1"]) and bool(r["eac_prior_cycle"])
+
+
+def test_the_allowance_is_thirty_days():
+    assert bool(_soft_copy("2026-02-18", samp="2026-01-10")["eac1"])        # 30 days before
+    assert not bool(_soft_copy("2026-02-17", samp="2026-01-10")["eac1"])    # 31 days before
+
+
+def test_a_soft_copy_cycle_belongs_to_the_new_result_not_the_earlier_episode():
+    """Unsuppressed in October, no EAC; the May sample comes back high and EAC
+    starts on the soft copy before the result is entered in the EMR."""
+    sn = "0.292929292929"
+    tu = pd.DataFrame([
+        {"S/N": sn, "currentViralLoad": 4560, "dateofCurrentViralLoad": "2025-10-13",
+         "lastDateOfSampleCollection": "2025-10-02", "dateResultReceivedFacility": "2025-10-13"},
+        {"S/N": sn, "currentViralLoad": 49400, "dateofCurrentViralLoad": "2026-05-25",
+         "lastDateOfSampleCollection": "2026-05-07", "dateResultReceivedFacility": "2026-05-25"},
+    ])
+    eac = pd.DataFrame([mk(**{"S/N": sn}, Session_1_Date="2026-05-19", Session_2_Date="2026-06-19")])
+    d = build_cohort(tu, treat(sn=sn), eac, as_of=pd.Timestamp("2026-10-31"),
+                     mode="snapshot").df.sort_values("idx_date").reset_index(drop=True)
+    assert not bool(d.loc[0, "eac1"])          # each episode on its own: October had no EAC
+    assert bool(d.loc[1, "eac1"]) and d.loc[1, "Session_1_Date"] == pd.Timestamp("2026-05-19")
